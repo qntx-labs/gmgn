@@ -34,6 +34,7 @@
 //! ```
 
 pub mod env;
+pub mod env_checker;
 pub mod envs;
 pub mod error;
 pub mod prelude;

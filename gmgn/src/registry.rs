@@ -263,17 +263,17 @@ impl TryFrom<DynValue> for String {
     }
 }
 
-impl From<HashMap<String, DynValue>> for DynValue {
-    fn from(v: HashMap<String, DynValue>) -> Self {
+impl From<HashMap<String, Self>> for DynValue {
+    fn from(v: HashMap<String, Self>) -> Self {
         Self::Dict(v)
     }
 }
 
-impl TryFrom<DynValue> for HashMap<String, DynValue> {
+impl<S: ::std::hash::BuildHasher + Default> TryFrom<DynValue> for HashMap<String, DynValue, S> {
     type Error = Error;
     fn try_from(v: DynValue) -> Result<Self> {
         match v {
-            DynValue::Dict(d) => Ok(d),
+            DynValue::Dict(d) => Ok(d.into_iter().collect()),
             other => Err(Error::TypeMismatch {
                 reason: format!("expected Dict, got {other:?}"),
             }),

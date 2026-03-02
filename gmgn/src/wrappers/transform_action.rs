@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn identity_transform() {
         let env = CartPoleEnv::new(CartPoleConfig::default()).unwrap();
-        let act_space = env.action_space().clone();
+        let act_space = *env.action_space();
         let mut env = TransformAction::new(env, |a: &i64| *a, act_space);
         env.reset(Some(42)).unwrap();
         let r = env.step(&0).unwrap();
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn flip_action() {
         let env = CartPoleEnv::new(CartPoleConfig::default()).unwrap();
-        let act_space = env.action_space().clone();
+        let act_space = *env.action_space();
         // Flip: 0 -> 1, 1 -> 0.
         let mut env = TransformAction::new(env, |a: &i64| 1 - a, act_space);
         env.reset(Some(42)).unwrap();

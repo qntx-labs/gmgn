@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "min_reward")]
     fn rejects_inverted_bounds() {
         let env = CartPoleEnv::new(CartPoleConfig::default()).unwrap();
         let _ = ClipReward::new(env, 1.0, -1.0);

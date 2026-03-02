@@ -111,7 +111,7 @@ impl<E: Env<Act = Vec<f32>, ActSpace = BoundedSpace>> Env for RescaleAction<E> {
             .zip(inner_space.low.iter().zip(inner_space.high.iter()))
             .map(|((&a, (&new_lo, &new_hi)), (&old_lo, &old_hi))| {
                 let t = (a - new_lo) / (new_hi - new_lo);
-                old_lo + t * (old_hi - old_lo)
+                t.mul_add(old_hi - old_lo, old_lo)
             })
             .collect();
         self.env.step(&mapped)
@@ -143,6 +143,7 @@ impl<E: Env<Act = Vec<f32>, ActSpace = BoundedSpace>> Env for RescaleAction<E> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)] // Panics are acceptable in test assertions.
 mod tests {
     use super::*;
     use crate::envs::classic_control::{PendulumConfig, PendulumEnv};

@@ -51,9 +51,9 @@ pub enum SpaceInfo {
         n: usize,
     },
     /// A tuple (product) of sub-spaces.
-    Tuple(Vec<SpaceInfo>),
+    Tuple(Vec<Self>),
     /// A dictionary of named sub-spaces.
-    Dict(Vec<(String, SpaceInfo)>),
+    Dict(Vec<(String, Self)>),
 }
 
 /// A space that defines the valid range for observations or actions.
