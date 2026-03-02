@@ -10,7 +10,8 @@ mod sync_vec;
 
 pub use sync_vec::SyncVectorEnv;
 
-use crate::env::Info;
+use crate::env::{Info, RenderFrame};
+use crate::error::Result;
 
 /// Batched results from [`SyncVectorEnv::step`].
 #[derive(Debug, Clone)]
@@ -44,4 +45,42 @@ pub enum AutoresetMode {
     NextStep,
     /// Disabled — the caller is responsible for resetting.
     Disabled,
+}
+
+/// Common interface for vectorized environments.
+///
+/// Abstracts over [`SyncVectorEnv`] (and future `AsyncVectorEnv`),
+/// mirroring [Gymnasium `VectorEnv`](https://gymnasium.farama.org/api/vector/#gymnasium.vector.VectorEnv).
+pub trait VectorEnv {
+    /// The observation type of each sub-environment.
+    type Obs;
+    /// The action type of each sub-environment.
+    type Act;
+
+    /// The number of sub-environments.
+    fn num_envs(&self) -> usize;
+
+    /// Reset all sub-environments.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered during reset.
+    fn reset(&mut self, seed: Option<u64>) -> Result<VecResetResult<Self::Obs>>;
+
+    /// Step all sub-environments with one action per env.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `actions.len() != num_envs()` or any sub-env fails.
+    fn step(&mut self, actions: &[Self::Act]) -> Result<VecStepResult<Self::Obs>>;
+
+    /// Render all sub-environments, returning one frame per env.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered during rendering.
+    fn render(&mut self) -> Result<Vec<RenderFrame>>;
+
+    /// Close all sub-environments.
+    fn close(&mut self);
 }

@@ -54,7 +54,11 @@ where
         let mut low = inner_space.low.clone();
         let mut high = inner_space.high.clone();
         low.push(0.0);
-        high.push(if max_steps.is_some() { 1.0 } else { f32::INFINITY });
+        high.push(if max_steps.is_some() {
+            1.0
+        } else {
+            f32::INFINITY
+        });
         // Safety: extending valid bounds with [0, ∞) or [0, 1] always produces valid bounds.
         let obs_space = BoundedSpace::new(low, high)
             .unwrap_or_else(|_| unreachable!("extending valid bounds cannot fail"));

@@ -65,13 +65,24 @@ where
         let dim = inner_space.low.len();
 
         // Repeat low/high bounds num_stack times.
-        let low: Vec<f32> = inner_space.low.iter().cycle().take(dim * num_stack).copied().collect();
-        let high: Vec<f32> = inner_space.high.iter().cycle().take(dim * num_stack).copied().collect();
-        let stacked_space = BoundedSpace::new(low, high).map_err(|e| {
-            crate::error::Error::InvalidSpace {
+        let low: Vec<f32> = inner_space
+            .low
+            .iter()
+            .cycle()
+            .take(dim * num_stack)
+            .copied()
+            .collect();
+        let high: Vec<f32> = inner_space
+            .high
+            .iter()
+            .cycle()
+            .take(dim * num_stack)
+            .copied()
+            .collect();
+        let stacked_space =
+            BoundedSpace::new(low, high).map_err(|e| crate::error::Error::InvalidSpace {
                 reason: format!("failed to create stacked observation space: {e}"),
-            }
-        })?;
+            })?;
 
         Ok(Self {
             env,

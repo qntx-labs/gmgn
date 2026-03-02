@@ -116,7 +116,15 @@ where
         Ok(result)
     }
 
-    delegate_env!(env, reset, render, close, render_mode, observation_space, action_space);
+    delegate_env!(
+        env,
+        reset,
+        render,
+        close,
+        render_mode,
+        observation_space,
+        action_space
+    );
 }
 
 #[cfg(test)]

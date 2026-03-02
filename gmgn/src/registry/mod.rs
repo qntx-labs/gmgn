@@ -96,6 +96,155 @@ pub fn make_with(id: &str, render_mode: RenderMode) -> Result<Box<dyn DynEnv>> {
     (spec.factory)(render_mode)
 }
 
+/// Create a synchronous vectorized environment from a registered id.
+///
+/// Spawns `num_envs` copies of the environment identified by `id`, each with
+/// `RenderMode::None`, and wraps them in a [`DynVectorEnv`].
+///
+/// # Errors
+///
+/// Returns [`Error::NotRegistered`] if the id is not found, or any
+/// sub-environment factory error.
+///
+/// # Panics
+///
+/// Panics if the internal registry lock is poisoned.
+pub fn make_vec(id: &str, num_envs: usize) -> Result<DynVectorEnv> {
+    make_vec_with(id, num_envs, RenderMode::None)
+}
+
+/// Create a synchronous vectorized environment with a specific render mode.
+///
+/// # Errors
+///
+/// Returns [`Error::NotRegistered`] if the id is not found, or any
+/// sub-environment factory error.
+///
+/// # Panics
+///
+/// Panics if the internal registry lock is poisoned.
+pub fn make_vec_with(id: &str, num_envs: usize, render_mode: RenderMode) -> Result<DynVectorEnv> {
+    if num_envs == 0 {
+        return Err(Error::InvalidSpace {
+            reason: "make_vec requires at least 1 environment".to_owned(),
+        });
+    }
+    let envs: Result<Vec<_>> = (0..num_envs).map(|_| make_with(id, render_mode)).collect();
+    Ok(DynVectorEnv::new(envs?))
+}
+
+/// A synchronous vectorized environment backed by type-erased [`DynEnv`] instances.
+///
+/// Created via [`make_vec`] or [`make_vec_with`]. Mirrors [`SyncVectorEnv`](crate::vector::SyncVectorEnv)
+/// but operates on [`DynValue`] observations and actions.
+#[derive(Debug)]
+pub struct DynVectorEnv {
+    envs: Vec<Box<dyn DynEnv>>,
+    needs_reset: Vec<bool>,
+}
+
+impl DynVectorEnv {
+    fn new(envs: Vec<Box<dyn DynEnv>>) -> Self {
+        let n = envs.len();
+        Self {
+            envs,
+            needs_reset: vec![false; n],
+        }
+    }
+
+    /// The number of sub-environments.
+    #[must_use]
+    pub fn num_envs(&self) -> usize {
+        self.envs.len()
+    }
+
+    /// Reset all sub-environments.
+    ///
+    /// If `seed` is provided, each sub-env receives `seed + i` as its seed.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered during reset.
+    pub fn reset(&mut self, seed: Option<u64>) -> Result<crate::vector::VecResetResult<DynValue>> {
+        let mut obs = Vec::with_capacity(self.envs.len());
+        let mut infos = Vec::with_capacity(self.envs.len());
+
+        for (i, env) in self.envs.iter_mut().enumerate() {
+            let s = seed.map(|s| s + i as u64);
+            let r = env.reset_dyn(s)?;
+            obs.push(r.obs);
+            infos.push(r.info);
+        }
+
+        self.needs_reset.fill(false);
+        Ok(crate::vector::VecResetResult { obs, infos })
+    }
+
+    /// Step all sub-environments with one action per env.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `actions.len() != num_envs()` or any sub-env fails.
+    pub fn step(&mut self, actions: &[DynValue]) -> Result<crate::vector::VecStepResult<DynValue>> {
+        if actions.len() != self.envs.len() {
+            return Err(Error::InvalidAction {
+                reason: format!(
+                    "expected {} actions, got {}",
+                    self.envs.len(),
+                    actions.len()
+                ),
+            });
+        }
+
+        let n = self.envs.len();
+        let mut obs = Vec::with_capacity(n);
+        let mut rewards = Vec::with_capacity(n);
+        let mut terminated = Vec::with_capacity(n);
+        let mut truncated = Vec::with_capacity(n);
+        let mut infos = Vec::with_capacity(n);
+
+        for (i, (env, action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
+            if self.needs_reset[i] {
+                env.reset_dyn(None)?;
+            }
+
+            let r = env.step_dyn(action)?;
+            let done = r.terminated || r.truncated;
+            self.needs_reset[i] = done;
+
+            obs.push(r.obs);
+            rewards.push(r.reward);
+            terminated.push(r.terminated);
+            truncated.push(r.truncated);
+            infos.push(r.info);
+        }
+
+        Ok(crate::vector::VecStepResult {
+            obs,
+            rewards,
+            terminated,
+            truncated,
+            infos,
+        })
+    }
+
+    /// Render all sub-environments.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error encountered during rendering.
+    pub fn render(&mut self) -> Result<Vec<crate::env::RenderFrame>> {
+        self.envs.iter_mut().map(|e| e.render_dyn()).collect()
+    }
+
+    /// Close all sub-environments.
+    pub fn close(&mut self) {
+        for env in &mut self.envs {
+            env.close_dyn();
+        }
+    }
+}
+
 /// Look up the [`EnvSpec`] for a registered id.
 ///
 /// Returns `None` if the id is not found.

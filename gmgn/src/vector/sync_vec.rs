@@ -4,7 +4,7 @@
 
 use crate::env::{Env, RenderFrame};
 use crate::error::{Error, Result};
-use crate::vector::{AutoresetMode, VecResetResult, VecStepResult};
+use crate::vector::{AutoresetMode, VecResetResult, VecStepResult, VectorEnv};
 
 /// Runs multiple copies of an environment sequentially in a single thread.
 ///
@@ -21,7 +21,7 @@ use crate::vector::{AutoresetMode, VecResetResult, VecStepResult};
 /// ```rust
 /// use gmgn::prelude::*;
 /// use gmgn::envs::classic_control::{CartPoleEnv, CartPoleConfig};
-/// use gmgn::vector::SyncVectorEnv;
+/// use gmgn::vector::{SyncVectorEnv, VectorEnv};
 ///
 /// let envs: Vec<CartPoleEnv> = (0..4)
 ///     .map(|_| CartPoleEnv::new(CartPoleConfig::default()).unwrap())
@@ -92,16 +92,17 @@ impl<E: Env> SyncVectorEnv<E> {
     pub fn get_env_mut(&mut self, index: usize) -> Option<&mut E> {
         self.envs.get_mut(index)
     }
+}
 
-    /// Reset all sub-environments.
-    ///
-    /// If `seed` is provided, each sub-env receives `seed + i` as its seed
-    /// (deterministic, reproducible).
-    ///
-    /// # Errors
-    ///
-    /// Returns the first error encountered during reset.
-    pub fn reset(&mut self, seed: Option<u64>) -> Result<VecResetResult<E::Obs>> {
+impl<E: Env> VectorEnv for SyncVectorEnv<E> {
+    type Obs = E::Obs;
+    type Act = E::Act;
+
+    fn num_envs(&self) -> usize {
+        self.envs.len()
+    }
+
+    fn reset(&mut self, seed: Option<u64>) -> Result<VecResetResult<E::Obs>> {
         let mut obs = Vec::with_capacity(self.envs.len());
         let mut infos = Vec::with_capacity(self.envs.len());
 
@@ -116,18 +117,7 @@ impl<E: Env> SyncVectorEnv<E> {
         Ok(VecResetResult { obs, infos })
     }
 
-    /// Step all sub-environments with one action per env.
-    ///
-    /// `actions` must have exactly [`num_envs`](Self::num_envs) elements.
-    ///
-    /// With [`AutoresetMode::NextStep`], sub-envs that terminated/truncated on
-    /// the previous step are automatically reset *before* the new action is
-    /// applied, and the reset observation is returned for that sub-env.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `actions.len() != num_envs()` or any sub-env fails.
-    pub fn step(&mut self, actions: &[E::Act]) -> Result<VecStepResult<E::Obs>> {
+    fn step(&mut self, actions: &[E::Act]) -> Result<VecStepResult<E::Obs>> {
         if actions.len() != self.envs.len() {
             return Err(Error::InvalidAction {
                 reason: format!(
@@ -146,7 +136,6 @@ impl<E: Env> SyncVectorEnv<E> {
         let mut infos = Vec::with_capacity(n);
 
         for (i, (env, action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
-            // Autoreset if the previous step ended the episode.
             if self.needs_reset[i] && self.autoreset_mode == AutoresetMode::NextStep {
                 env.reset(None)?;
             }
@@ -172,17 +161,11 @@ impl<E: Env> SyncVectorEnv<E> {
         })
     }
 
-    /// Render all sub-environments, returning one frame per env.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first error encountered during rendering.
-    pub fn render(&mut self) -> Result<Vec<RenderFrame>> {
+    fn render(&mut self) -> Result<Vec<RenderFrame>> {
         self.envs.iter_mut().map(Env::render).collect()
     }
 
-    /// Close all sub-environments.
-    pub fn close(&mut self) {
+    fn close(&mut self) {
         for env in &mut self.envs {
             env.close();
         }

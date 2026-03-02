@@ -47,9 +47,7 @@ where
     pub fn new(env: E, repeat_probability: f64) -> Result<Self> {
         if !(0.0..1.0).contains(&repeat_probability) {
             return Err(crate::error::Error::InvalidAction {
-                reason: format!(
-                    "repeat_probability must be in [0, 1), got {repeat_probability}"
-                ),
+                reason: format!("repeat_probability must be in [0, 1), got {repeat_probability}"),
             });
         }
         Ok(Self {
@@ -112,7 +110,14 @@ where
         self.env.reset(seed)
     }
 
-    delegate_env!(env, render, close, render_mode, observation_space, action_space);
+    delegate_env!(
+        env,
+        render,
+        close,
+        render_mode,
+        observation_space,
+        action_space
+    );
 }
 
 #[cfg(test)]
