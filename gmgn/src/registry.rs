@@ -13,6 +13,7 @@ use std::sync::{LazyLock, RwLock};
 use crate::env::RenderMode;
 use crate::env::{RenderFrame, ResetResult, StepResult};
 use crate::error::{Error, Result};
+use crate::space::SpaceInfo;
 
 /// Metadata and factory for a registered environment.
 ///
@@ -36,42 +37,6 @@ impl std::fmt::Debug for EnvSpec {
             .field("reward_threshold", &self.reward_threshold)
             .finish_non_exhaustive()
     }
-}
-
-/// Describes the structure of a [`Space`](crate::space::Space) at runtime.
-///
-/// Used by [`DynEnv`] to expose observation and action space metadata
-/// without requiring concrete generic types.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SpaceInfo {
-    /// A discrete space with `n` possible values `{0, 1, ..., n-1}`.
-    Discrete {
-        /// The number of discrete values.
-        n: i64,
-    },
-    /// A bounded continuous space (box).
-    Bounded {
-        /// Lower bounds per dimension.
-        low: Vec<f32>,
-        /// Upper bounds per dimension.
-        high: Vec<f32>,
-        /// Shape of elements.
-        shape: Vec<usize>,
-    },
-    /// A multi-discrete space with per-dimension counts.
-    MultiDiscrete {
-        /// Number of discrete values per dimension.
-        nvec: Vec<i64>,
-    },
-    /// A multi-binary space with `n` binary elements.
-    MultiBinary {
-        /// Number of binary elements.
-        n: usize,
-    },
-    /// A tuple (product) of sub-spaces.
-    Tuple(Vec<SpaceInfo>),
-    /// A dictionary of named sub-spaces.
-    Dict(Vec<(String, SpaceInfo)>),
 }
 
 /// A dynamically-typed reinforcement learning environment value.
@@ -125,15 +90,24 @@ pub trait DynEnv: std::fmt::Debug {
 
     /// Clean up resources.
     fn close_dyn(&mut self);
+
+    /// Runtime description of the observation space.
+    fn observation_space_info(&self) -> SpaceInfo;
+
+    /// Runtime description of the action space.
+    fn action_space_info(&self) -> SpaceInfo;
 }
 
 use crate::env::Env;
+use crate::space::Space;
 
 impl<E> DynEnv for E
 where
     E: Env + std::fmt::Debug,
     E::Obs: Into<DynValue>,
     E::Act: TryFrom<DynValue, Error = Error>,
+    E::ObsSpace: Space,
+    E::ActSpace: Space,
 {
     fn step_dyn(&mut self, action: &DynValue) -> Result<StepResult<DynValue>> {
         let act = E::Act::try_from(action.clone())?;
@@ -161,6 +135,14 @@ where
 
     fn close_dyn(&mut self) {
         self.close();
+    }
+
+    fn observation_space_info(&self) -> SpaceInfo {
+        self.observation_space().space_info()
+    }
+
+    fn action_space_info(&self) -> SpaceInfo {
+        self.action_space().space_info()
     }
 }
 

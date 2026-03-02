@@ -3,7 +3,7 @@
 use rand::RngExt as _;
 
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Space, SpaceInfo};
 
 /// A space consisting of `n` consecutive integers starting from `start`.
 ///
@@ -71,6 +71,12 @@ impl Space for Discrete {
     #[allow(clippy::cast_possible_truncation)] // n fits in usize on all supported platforms.
     fn flatdim(&self) -> usize {
         self.n as usize
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::Discrete {
+            n: self.n.cast_signed(),
+        }
     }
 }
 

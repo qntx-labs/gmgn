@@ -4,7 +4,7 @@ use rand::RngExt as _;
 
 use crate::error::{Error, Result};
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Space, SpaceInfo};
 
 /// A continuous space representing the Cartesian product of closed intervals.
 ///
@@ -125,6 +125,14 @@ impl Space for BoundedSpace {
 
     fn flatdim(&self) -> usize {
         self.low.len()
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::Bounded {
+            low: self.low.clone(),
+            high: self.high.clone(),
+            shape: self.shape.clone(),
+        }
     }
 }
 

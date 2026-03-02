@@ -6,7 +6,7 @@ use rand::RngExt as _;
 
 use crate::error::{Error, Result};
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Space, SpaceInfo};
 
 /// The cartesian product of multiple [`Discrete`](super::Discrete) spaces.
 ///
@@ -131,6 +131,12 @@ impl Space for MultiDiscrete {
     #[allow(clippy::cast_possible_truncation)] // nvec elements are small in practice.
     fn flatdim(&self) -> usize {
         self.nvec.iter().map(|&n| n as usize).sum()
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::MultiDiscrete {
+            nvec: self.nvec.iter().map(|&n| n.cast_signed()).collect(),
+        }
     }
 }
 

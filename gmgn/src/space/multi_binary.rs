@@ -6,7 +6,7 @@ use rand::RngExt as _;
 
 use crate::error::{Error, Result};
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Space, SpaceInfo};
 
 /// A space of binary vectors of fixed length.
 ///
@@ -72,6 +72,10 @@ impl Space for MultiBinary {
 
     fn flatdim(&self) -> usize {
         self.n
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::MultiBinary { n: self.n }
     }
 }
 

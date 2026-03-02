@@ -21,7 +21,7 @@
 //! ```
 
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Space, SpaceInfo};
 
 /// Cartesian product of two spaces.
 ///
@@ -60,6 +60,10 @@ impl<A: Space, B: Space> Space for Tuple2<A, B> {
 
     fn flatdim(&self) -> usize {
         self.first.flatdim() + self.second.flatdim()
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::Tuple(vec![self.first.space_info(), self.second.space_info()])
     }
 }
 
@@ -111,6 +115,14 @@ impl<A: Space, B: Space, C: Space> Space for Tuple3<A, B, C> {
 
     fn flatdim(&self) -> usize {
         self.first.flatdim() + self.second.flatdim() + self.third.flatdim()
+    }
+
+    fn space_info(&self) -> SpaceInfo {
+        SpaceInfo::Tuple(vec![
+            self.first.space_info(),
+            self.second.space_info(),
+            self.third.space_info(),
+        ])
     }
 }
 

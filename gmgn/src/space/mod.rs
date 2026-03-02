@@ -20,6 +20,42 @@ pub use tuple::{Tuple2, Tuple3};
 
 use crate::rng::Rng;
 
+/// Describes the structure of a [`Space`] at runtime.
+///
+/// Used by [`DynEnv`](crate::registry::DynEnv) to expose observation and
+/// action space metadata without requiring concrete generic types.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpaceInfo {
+    /// A discrete space with `n` possible values `{0, 1, ..., n-1}`.
+    Discrete {
+        /// The number of discrete values.
+        n: i64,
+    },
+    /// A bounded continuous space (box).
+    Bounded {
+        /// Lower bounds per dimension.
+        low: Vec<f32>,
+        /// Upper bounds per dimension.
+        high: Vec<f32>,
+        /// Shape of elements.
+        shape: Vec<usize>,
+    },
+    /// A multi-discrete space with per-dimension counts.
+    MultiDiscrete {
+        /// Number of discrete values per dimension.
+        nvec: Vec<i64>,
+    },
+    /// A multi-binary space with `n` binary elements.
+    MultiBinary {
+        /// Number of binary elements.
+        n: usize,
+    },
+    /// A tuple (product) of sub-spaces.
+    Tuple(Vec<SpaceInfo>),
+    /// A dictionary of named sub-spaces.
+    Dict(Vec<(String, SpaceInfo)>),
+}
+
 /// A space that defines the valid range for observations or actions.
 ///
 /// Every space knows how to [`sample`](Space::sample) random elements and
@@ -45,4 +81,7 @@ pub trait Space {
     /// For [`Discrete`] this is `n`, for [`BoundedSpace`] it equals
     /// `shape().iter().product()`, etc.
     fn flatdim(&self) -> usize;
+
+    /// Return a runtime description of this space's structure.
+    fn space_info(&self) -> SpaceInfo;
 }
