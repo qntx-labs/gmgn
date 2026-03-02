@@ -238,4 +238,53 @@ impl Canvas {
             .flat_map(|px| [px.red(), px.green(), px.blue()])
             .collect()
     }
+
+    /// Decode a PNG from raw bytes and scale it to `(w, h)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the PNG data is invalid or if the target dimensions are zero.
+    #[must_use]
+    pub fn decode_png_scaled(data: &[u8], w: u32, h: u32) -> Pixmap {
+        let src = Pixmap::decode_png(data).expect("valid PNG data");
+        if src.width() == w && src.height() == h {
+            return src;
+        }
+        let mut dst = Pixmap::new(w, h).expect("non-zero dimensions");
+        #[allow(clippy::cast_precision_loss)]
+        let sx = w as f32 / src.width() as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let sy = h as f32 / src.height() as f32;
+        dst.draw_pixmap(
+            0,
+            0,
+            src.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            Transform::from_scale(sx, sy),
+            None,
+        );
+        dst
+    }
+
+    /// Blit (alpha-composite) a source pixmap onto this canvas at `(x, y)`.
+    pub fn blit(&mut self, x: i32, y: i32, src: &Pixmap) {
+        self.pixmap.draw_pixmap(
+            x,
+            y,
+            src.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            Transform::identity(),
+            None,
+        );
+    }
+
+    /// Blit a source pixmap with a custom global alpha (0–255).
+    pub fn blit_with_alpha(&mut self, x: i32, y: i32, src: &Pixmap, alpha: u8) {
+        let paint = tiny_skia::PixmapPaint {
+            opacity: f32::from(alpha) / 255.0,
+            ..tiny_skia::PixmapPaint::default()
+        };
+        self.pixmap
+            .draw_pixmap(x, y, src.as_ref(), &paint, Transform::identity(), None);
+    }
 }

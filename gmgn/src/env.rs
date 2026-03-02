@@ -26,6 +26,8 @@ pub enum InfoValue {
     Float(f64),
     /// Free-form string.
     String(String),
+    /// Array of integers (e.g. action masks).
+    IntArray(Vec<i64>),
 }
 
 /// Auxiliary diagnostic information returned alongside observations.

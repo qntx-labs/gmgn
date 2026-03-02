@@ -12,5 +12,5 @@ mod taxi;
 
 pub use blackjack::{BlackjackConfig, BlackjackEnv};
 pub use cliff_walking::{CliffWalkingConfig, CliffWalkingEnv};
-pub use frozen_lake::{FrozenLakeConfig, FrozenLakeEnv, MAP_4X4, MAP_8X8};
+pub use frozen_lake::{FrozenLakeConfig, FrozenLakeEnv, MAP_4X4, MAP_8X8, generate_random_map};
 pub use taxi::{TaxiConfig, TaxiEnv};

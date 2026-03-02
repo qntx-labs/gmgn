@@ -11,8 +11,15 @@ use std::collections::HashMap;
 
 use crate::env::{Env, InfoValue, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow, sprites::CliffWalkingSprites};
 use crate::rng::{self, Rng};
 use crate::space::{Discrete, Space};
+
+#[cfg(feature = "render")]
+const CELL_SIZE: u32 = 60;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 4;
 
 // Actions.
 const UP: i64 = 0;
@@ -76,6 +83,13 @@ pub struct CliffWalkingEnv {
 
     /// Start state index (row=3, col=0 → 36).
     start_state: i64,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
+    #[cfg(feature = "render")]
+    sprites: Option<CliffWalkingSprites>,
 }
 
 impl std::fmt::Debug for CliffWalkingEnv {
@@ -150,6 +164,116 @@ impl CliffWalkingEnv {
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
             start_state,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
+            #[cfg(feature = "render")]
+            sprites: None,
+        }
+    }
+
+    /// Render the 4×12 grid using PNG sprites, matching Gymnasium's official look.
+    #[cfg(feature = "render")]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        clippy::many_single_char_names,
+        clippy::match_same_arms
+    )]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.state.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+        let s = self.state.expect("checked above") as usize;
+
+        let w = (NUM_COLS as u32) * CELL_SIZE;
+        let h = (NUM_ROWS as u32) * CELL_SIZE;
+
+        let sprites = self
+            .sprites
+            .get_or_insert_with(|| CliffWalkingSprites::new(CELL_SIZE, CELL_SIZE));
+
+        let is_cliff = |r: usize, c: usize| -> bool { r == 3 && (1..=10).contains(&c) };
+        let start_state_idx = 3 * NUM_COLS; // row=3, col=0
+        let goal_state_idx = NUM_ROWS * NUM_COLS - 1; // row=3, col=11
+
+        let canvas = self.canvas.get_or_insert_with(|| Canvas::new(w, h));
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        // Draw tiles — mirrors Gymnasium's _render_gui.
+        for state in 0..(NUM_ROWS * NUM_COLS) {
+            let r = state / NUM_COLS;
+            let c = state % NUM_COLS;
+            let px = (c as u32 * CELL_SIZE) as i32;
+            let py = (r as u32 * CELL_SIZE) as i32;
+            let check = (r % 2) ^ (c % 2);
+
+            // Mountain background (checkerboard pattern).
+            canvas.blit(px, py, &sprites.bg[check]);
+
+            // Cliff overlay.
+            if is_cliff(r, c) {
+                canvas.blit(px, py, &sprites.cliff);
+            }
+            // Near-cliff overlay (row above cliff).
+            if r < NUM_ROWS - 1 && is_cliff(r + 1, c) {
+                canvas.blit(px, py, &sprites.near_cliff[check]);
+            }
+            // Start stool.
+            if state == start_state_idx {
+                canvas.blit(px, py, &sprites.stool);
+            }
+            // Goal cookie.
+            if state == goal_state_idx {
+                canvas.blit(px, py, &sprites.cookie);
+            }
+            // Elf (player) at current position.
+            if state == s {
+                // Gymnasium offsets elf up by 10% of cell height.
+                let elf_y = py - (CELL_SIZE as f32 * 0.1) as i32;
+                // Action order: [up=0, right=1, down=2, left=3].
+                let last_action = self.last_action.unwrap_or(DOWN) as usize;
+                let elf_idx = match last_action as i64 {
+                    UP => 0,
+                    RIGHT => 1,
+                    DOWN => 2,
+                    LEFT => 3,
+                    _ => 2,
+                };
+                canvas.blit(px, elf_y, &sprites.elf[elf_idx]);
+            }
+        }
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "CliffWalking \u{2014} gmgn",
+                        w as usize,
+                        h as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: w,
+                    height: h,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
         }
     }
 }
@@ -210,6 +334,7 @@ impl Env for CliffWalkingEnv {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn render(&mut self) -> Result<RenderFrame> {
         match self.render_mode {
+            RenderMode::None => Ok(RenderFrame::None),
             RenderMode::Ansi => {
                 if self.state.is_none() {
                     return Err(Error::ResetNeeded { method: "render" });
@@ -259,7 +384,12 @@ impl Env for CliffWalkingEnv {
 
                 Ok(RenderFrame::Ansi(lines.join("\n")))
             }
-            _ => Ok(RenderFrame::None),
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
+            _ => Err(Error::UnsupportedRenderMode {
+                mode: format!("{:?}", self.render_mode),
+            }),
         }
     }
 

@@ -7,6 +7,7 @@
 //! This module is only available when the `render` feature is enabled.
 
 mod canvas;
+pub mod sprites;
 mod window;
 
 pub use canvas::Canvas;

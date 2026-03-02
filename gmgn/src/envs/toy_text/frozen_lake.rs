@@ -11,8 +11,15 @@ use std::collections::HashMap;
 
 use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow, sprites::FrozenLakeSprites};
 use crate::rng::{self, Rng};
 use crate::space::{Discrete, Space};
+
+#[cfg(feature = "render")]
+const CELL_SIZE: u32 = 64;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 4;
 
 /// Sample an index from a categorical probability distribution.
 fn categorical_sample(probs: &[f64], rng: &mut Rng) -> usize {
@@ -41,6 +48,97 @@ pub const MAP_4X4: &[&str] = &["SFFF", "FHFH", "FFFH", "HFFG"];
 pub const MAP_8X8: &[&str] = &[
     "SFFFFFFF", "FFFFFFFF", "FFFHFFFF", "FFFFFHFF", "FFFHFFFF", "FHHFFFHF", "FHFFHFHF", "FFFHFFFG",
 ];
+
+/// Check whether there is a path from `S` (top-left) to `G` using DFS.
+///
+/// Mirrors Gymnasium's `is_valid` helper.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
+fn is_valid_map(board: &[Vec<u8>], size: usize) -> bool {
+    let mut discovered = vec![vec![false; size]; size];
+    let mut stack = vec![(0usize, 0usize)];
+    while let Some((r, c)) = stack.pop() {
+        if discovered[r][c] {
+            continue;
+        }
+        discovered[r][c] = true;
+        for (dr, dc) in [(1i32, 0i32), (0, 1), (-1, 0), (0, -1)] {
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+            if nr < 0 || nr >= size as i32 || nc < 0 || nc >= size as i32 {
+                continue;
+            }
+            let (nr, nc) = (nr as usize, nc as usize);
+            if board[nr][nc] == b'G' {
+                return true;
+            }
+            if board[nr][nc] != b'H' {
+                stack.push((nr, nc));
+            }
+        }
+    }
+    false
+}
+
+/// Generate a random valid frozen-lake map.
+///
+/// Keeps generating random boards until one with a valid path from `S` to `G`
+/// is found.  Mirrors Gymnasium's `generate_random_map`.
+///
+/// # Arguments
+///
+/// - `size` — Side length of the square grid (default 8).
+/// - `p` — Probability that a tile is frozen (`F`) rather than a hole (`H`).
+/// - `seed` — Optional RNG seed for reproducibility.
+///
+/// # Panics
+///
+/// Panics if the generated board contains non-ASCII bytes (should never
+/// happen since only `S`, `F`, `H`, `G` are used).
+///
+/// # Examples
+///
+/// ```
+/// let map = gmgn::envs::toy_text::generate_random_map(8, 0.8, Some(42));
+/// assert_eq!(map.len(), 8);
+/// assert!(map[0].starts_with('S'));
+/// assert!(map[7].ends_with('G'));
+/// ```
+#[must_use]
+pub fn generate_random_map(size: usize, p: f64, seed: Option<u64>) -> Vec<String> {
+    use rand::RngExt as _;
+
+    let mut rng = rng::create_rng(seed);
+    let p = p.min(1.0);
+
+    loop {
+        let mut board: Vec<Vec<u8>> = (0..size)
+            .map(|_| {
+                (0..size)
+                    .map(|_| {
+                        if rng.random_range(0.0..1.0) < p {
+                            b'F'
+                        } else {
+                            b'H'
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        board[0][0] = b'S';
+        board[size - 1][size - 1] = b'G';
+
+        if is_valid_map(&board, size) {
+            return board
+                .iter()
+                .map(|row| String::from_utf8(row.clone()).expect("ASCII"))
+                .collect();
+        }
+    }
+}
 
 /// A single transition entry: `(probability, next_state, reward, terminated)`.
 type Transition = (f64, i64, f64, bool);
@@ -105,6 +203,13 @@ pub struct FrozenLakeEnv {
 
     /// Initial-state distribution (uniform over `S` tiles).
     initial_state_distrib: Vec<f64>,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
+    #[cfg(feature = "render")]
+    sprites: Option<FrozenLakeSprites>,
 }
 
 impl std::fmt::Debug for FrozenLakeEnv {
@@ -226,7 +331,118 @@ impl FrozenLakeEnv {
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
             initial_state_distrib,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
+            #[cfg(feature = "render")]
+            sprites: None,
         })
+    }
+
+    /// Render the grid using PNG sprites, matching Gymnasium's official look.
+    ///
+    /// Uses ice/hole/goal/stool/elf PNG assets scaled to cell size.
+    #[cfg(feature = "render")]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        clippy::many_single_char_names
+    )]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.state.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+        let s = self.state.expect("checked above") as usize;
+        let cur_row = s / self.ncol;
+        let cur_col = s % self.ncol;
+
+        let w = (self.ncol as u32) * CELL_SIZE;
+        let h = (self.nrow as u32) * CELL_SIZE;
+
+        let sprites = self
+            .sprites
+            .get_or_insert_with(|| FrozenLakeSprites::new(CELL_SIZE, CELL_SIZE));
+
+        let canvas = self.canvas.get_or_insert_with(|| Canvas::new(w, h));
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        let grid_color = tiny_skia::Color::from_rgba8(180, 200, 230, 255);
+
+        // Draw tiles — mirrors Gymnasium's _render_gui exactly.
+        for r in 0..self.nrow {
+            for c in 0..self.ncol {
+                let px = (c as u32 * CELL_SIZE) as i32;
+                let py = (r as u32 * CELL_SIZE) as i32;
+                let tile = self.desc[r][c];
+
+                // Base: ice background on every cell.
+                canvas.blit(px, py, &sprites.ice);
+
+                // Overlay per tile type.
+                match tile {
+                    b'H' => canvas.blit(px, py, &sprites.hole),
+                    b'G' => canvas.blit(px, py, &sprites.goal),
+                    b'S' => canvas.blit(px, py, &sprites.stool),
+                    _ => {}
+                }
+
+                // Grid lines (1 px border like Gymnasium).
+                let fx = px as f32;
+                let fy = py as f32;
+                let cs = CELL_SIZE as f32;
+                canvas.stroke_line(fx, fy, fx + cs, fy, 1.0, grid_color);
+                canvas.stroke_line(fx + cs, fy, fx + cs, fy + cs, 1.0, grid_color);
+                canvas.stroke_line(fx + cs, fy + cs, fx, fy + cs, 1.0, grid_color);
+                canvas.stroke_line(fx, fy + cs, fx, fy, 1.0, grid_color);
+            }
+        }
+
+        // Draw the elf (player).
+        let bot_x = (cur_col as u32 * CELL_SIZE) as i32;
+        let bot_y = (cur_row as u32 * CELL_SIZE) as i32;
+        let last_action = self.last_action.unwrap_or(DOWN) as usize;
+        let tile = self.desc[cur_row][cur_col];
+
+        if tile == b'H' {
+            // Elf fell into a hole — show cracked hole.
+            canvas.blit(bot_x, bot_y, &sprites.cracked_hole);
+        } else {
+            // Elf sprite oriented by last action: [left=0, down=1, right=2, up=3].
+            let elf_idx = last_action.min(3);
+            canvas.blit(bot_x, bot_y, &sprites.elf[elf_idx]);
+        }
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "FrozenLake \u{2014} gmgn",
+                        w as usize,
+                        h as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: w,
+                    height: h,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
     }
 }
 
@@ -293,6 +509,7 @@ impl Env for FrozenLakeEnv {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn render(&mut self) -> Result<RenderFrame> {
         match self.render_mode {
+            RenderMode::None => Ok(RenderFrame::None),
             RenderMode::Ansi => {
                 if self.state.is_none() {
                     return Err(Error::ResetNeeded { method: "render" });
@@ -331,7 +548,12 @@ impl Env for FrozenLakeEnv {
                 }
                 Ok(RenderFrame::Ansi(lines.join("\n")))
             }
-            _ => Ok(RenderFrame::None),
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
+            _ => Err(Error::UnsupportedRenderMode {
+                mode: format!("{:?}", self.render_mode),
+            }),
         }
     }
 
@@ -454,6 +676,45 @@ mod tests {
         let s2 = e2.step(&1).unwrap();
         assert_eq!(s1.obs, s2.obs);
         assert!((s1.reward - s2.reward).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn generate_random_map_produces_valid_board() {
+        let map = generate_random_map(8, 0.8, Some(42));
+        assert_eq!(map.len(), 8);
+        for row in &map {
+            assert_eq!(row.len(), 8);
+        }
+        assert!(map[0].starts_with('S'));
+        assert!(map[7].ends_with('G'));
+        // Verify all tiles are valid characters.
+        for row in &map {
+            for ch in row.chars() {
+                assert!(
+                    ch == 'S' || ch == 'F' || ch == 'H' || ch == 'G',
+                    "unexpected tile: {ch}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generate_random_map_deterministic_with_seed() {
+        let m1 = generate_random_map(6, 0.7, Some(99));
+        let m2 = generate_random_map(6, 0.7, Some(99));
+        assert_eq!(m1, m2);
+    }
+
+    #[test]
+    fn generate_random_map_can_be_used_as_config() {
+        let map = generate_random_map(4, 0.9, Some(123));
+        let env = FrozenLakeEnv::new(FrozenLakeConfig {
+            desc: map,
+            is_slippery: false,
+            ..FrozenLakeConfig::default()
+        })
+        .unwrap();
+        assert_eq!(env.observation_space().n, 16);
     }
 
     #[test]

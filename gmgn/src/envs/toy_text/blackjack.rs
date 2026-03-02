@@ -12,8 +12,17 @@ use rand::RngExt as _;
 
 use crate::env::{Env, InfoValue, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow, sprites::BlackjackSprites};
 use crate::rng::{self, Rng};
 use crate::space::{Discrete, Space, Tuple3};
+
+#[cfg(feature = "render")]
+const SCREEN_W: u32 = 600;
+#[cfg(feature = "render")]
+const SCREEN_H: u32 = 500;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 4;
 
 // Infinite deck: 1 = Ace, 2-10 = number cards, J/Q/K = 10.
 const DECK: [i64; 13] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];
@@ -80,6 +89,18 @@ pub struct BlackjackEnv {
     sab: bool,
     rng: Rng,
     render_mode: RenderMode,
+
+    /// Dealer's top card suit for rendering ('C','D','H','S').
+    dealer_top_card_suit: u8,
+    /// Dealer's top card value string for rendering ('2'..'9','T','J','Q','K','A').
+    dealer_top_card_value: u8,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
+    #[cfg(feature = "render")]
+    sprites: Option<BlackjackSprites>,
 }
 
 impl std::fmt::Debug for BlackjackEnv {
@@ -158,6 +179,193 @@ impl BlackjackEnv {
             sab: config.sab,
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
+            dealer_top_card_suit: b'C',
+            dealer_top_card_value: b'2',
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
+            #[cfg(feature = "render")]
+            sprites: None,
+        }
+    }
+
+    /// Render the blackjack table using PNG card images, matching Gymnasium's layout.
+    ///
+    /// Uses 600×500 canvas with green felt, dealer's showing card + hidden card
+    /// back, and player sum indicator bar.  Card images from Gymnasium assets.
+    #[cfg(feature = "render")]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        clippy::many_single_char_names,
+        clippy::comparison_chain,
+    )]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.player.is_empty() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+
+        let (player_sum, _dealer_card, player_usable_ace) = get_obs(&self.player, &self.dealer);
+
+        let card_img_h = SCREEN_H / 3;
+        // Original card aspect ratio is 142:197.
+        let card_img_w = (card_img_h as f32 * 142.0 / 197.0) as u32;
+        let spacing = SCREEN_H / 20;
+
+        // Lazily init sprites (only the card back needs caching; faces decoded on demand).
+        let _ = self
+            .sprites
+            .get_or_insert_with(|| BlackjackSprites::new(card_img_w, card_img_h));
+
+        let canvas = self
+            .canvas
+            .get_or_insert_with(|| Canvas::new(SCREEN_W, SCREEN_H));
+
+        // Green felt background (same as Gymnasium: rgb(7, 99, 36)).
+        canvas.clear(tiny_skia::Color::from_rgba8(7, 99, 36, 255));
+        let white = tiny_skia::Color::WHITE;
+
+        // --- Dealer section ---
+        // "Dealer: X" label area (white bar approximation since we can't render text).
+        let dealer_bar_y = spacing;
+        canvas.fill_rect(
+            spacing as f32,
+            dealer_bar_y as f32,
+            160.0,
+            20.0,
+            tiny_skia::Color::from_rgba8(255, 255, 255, 60),
+        );
+
+        // Dealer showing card.
+        let dealer_card_img = BlackjackSprites::decode_card(
+            self.dealer_top_card_suit,
+            self.dealer_top_card_value,
+            card_img_w,
+            card_img_h,
+        );
+        let dealer_card_x = (SCREEN_W / 2 - card_img_w - spacing / 2) as i32;
+        let dealer_card_y = (dealer_bar_y + 20 + spacing) as i32;
+        canvas.blit(dealer_card_x, dealer_card_y, &dealer_card_img);
+
+        // Hidden card (card back).
+        let sprites = self.sprites.as_ref().expect("sprites initialized above");
+        let hidden_x = (SCREEN_W / 2 + spacing / 2) as i32;
+        canvas.blit(hidden_x, dealer_card_y, &sprites.card_back);
+
+        // --- Player section ---
+        let player_label_y = dealer_card_y + card_img_h as i32 + (1.5 * spacing as f32) as i32;
+        canvas.fill_rect(
+            spacing as f32,
+            player_label_y as f32,
+            100.0,
+            20.0,
+            tiny_skia::Color::from_rgba8(255, 255, 255, 60),
+        );
+
+        // Player sum indicator (large bar showing value proportion to 21).
+        let sum_bar_y = player_label_y + 20 + spacing as i32;
+        let bar_max_w = (SCREEN_W - 2 * spacing) as f32;
+        let bar_w = (player_sum as f32 / 21.0).min(1.0) * bar_max_w;
+        let bar_color = if player_sum > 21 {
+            tiny_skia::Color::from_rgba8(220, 50, 50, 255) // Bust = red.
+        } else if player_sum == 21 {
+            tiny_skia::Color::from_rgba8(255, 215, 0, 255) // Blackjack = gold.
+        } else {
+            tiny_skia::Color::from_rgba8(100, 200, 100, 255) // Normal = green.
+        };
+        canvas.fill_rect(spacing as f32, sum_bar_y as f32, bar_w, 40.0, bar_color);
+        // Border.
+        canvas.stroke_line(
+            spacing as f32,
+            sum_bar_y as f32,
+            (SCREEN_W - spacing) as f32,
+            sum_bar_y as f32,
+            1.0,
+            white,
+        );
+        canvas.stroke_line(
+            spacing as f32,
+            (sum_bar_y + 40) as f32,
+            (SCREEN_W - spacing) as f32,
+            (sum_bar_y + 40) as f32,
+            1.0,
+            white,
+        );
+        // 21 reference line.
+        let ref_x = (SCREEN_W - spacing) as f32;
+        canvas.stroke_line(
+            ref_x,
+            (sum_bar_y - 5) as f32,
+            ref_x,
+            (sum_bar_y + 45) as f32,
+            2.0,
+            tiny_skia::Color::from_rgba8(255, 215, 0, 200),
+        );
+
+        // Usable ace indicator (purple circle).
+        if player_usable_ace == 1 {
+            let ace_x = (SCREEN_W / 2) as f32;
+            let ace_y = (sum_bar_y + 60) as f32;
+            canvas.fill_circle(
+                ace_x,
+                ace_y,
+                10.0,
+                tiny_skia::Color::from_rgba8(200, 0, 200, 255),
+            );
+        }
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "Blackjack \u{2014} gmgn",
+                        SCREEN_W as usize,
+                        SCREEN_H as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: SCREEN_W,
+                    height: SCREEN_H,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
+    }
+
+    /// Pick a random card suit for rendering.
+    fn random_suit(rng: &mut Rng) -> u8 {
+        [b'C', b'D', b'H', b'S'][rng.random_range(0..4)]
+    }
+
+    /// Map a dealer card value (1-10) to a display character for PNG lookup.
+    fn card_value_char(value: i64, rng: &mut Rng) -> u8 {
+        match value {
+            1 => b'A',
+            2 => b'2',
+            3 => b'3',
+            4 => b'4',
+            5 => b'5',
+            6 => b'6',
+            7 => b'7',
+            8 => b'8',
+            9 => b'9',
+            10 => [b'T', b'J', b'Q', b'K'][rng.random_range(0..4)],
+            _ => b'T',
         }
     }
 }
@@ -234,6 +442,11 @@ impl Env for BlackjackEnv {
         self.dealer = draw_hand(&mut self.rng);
         self.player = draw_hand(&mut self.rng);
 
+        // Track dealer's showing card suit/value for PNG rendering.
+        let dealer_card_value = self.dealer[0];
+        self.dealer_top_card_suit = Self::random_suit(&mut self.rng);
+        self.dealer_top_card_value = Self::card_value_char(dealer_card_value, &mut self.rng);
+
         let obs = get_obs(&self.player, &self.dealer);
 
         let mut info = HashMap::new();
@@ -251,6 +464,7 @@ impl Env for BlackjackEnv {
 
     fn render(&mut self) -> Result<RenderFrame> {
         match self.render_mode {
+            RenderMode::None => Ok(RenderFrame::None),
             RenderMode::Ansi => {
                 if self.player.is_empty() {
                     return Err(Error::ResetNeeded { method: "render" });
@@ -268,7 +482,12 @@ impl Env for BlackjackEnv {
                 ));
                 Ok(RenderFrame::Ansi(lines.join("\n")))
             }
-            _ => Ok(RenderFrame::None),
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
+            _ => Err(Error::UnsupportedRenderMode {
+                mode: format!("{:?}", self.render_mode),
+            }),
         }
     }
 
