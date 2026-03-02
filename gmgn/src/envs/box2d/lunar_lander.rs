@@ -350,16 +350,13 @@ impl LunarLanderEnv {
             height[i] = self.helipad_y;
         }
 
-        // Smooth heights
+        // Smooth heights — Python uses `height[i-1]` which wraps to `height[-1]`
+        // (the last element) when i=0, and the coefficient is literally 0.33.
         let smooth_y: Vec<f32> = (0..CHUNKS)
             .map(|i| {
-                let prev = if i > 0 { height[i - 1] } else { height[0] };
-                let next = if i + 1 < height.len() {
-                    height[i + 1]
-                } else {
-                    height[CHUNKS - 1]
-                };
-                (prev + height[i] + next) / 3.0
+                let prev = if i > 0 { height[i - 1] } else { height[CHUNKS] };
+                let next = height[i + 1];
+                0.33 * (prev + height[i] + next)
             })
             .collect();
 
@@ -452,8 +449,8 @@ impl LunarLanderEnv {
 
         // Wind indices
         if self.enable_wind {
-            self.wind_idx = self.rng.random_range(-9999.0_f32..9999.0);
-            self.torque_idx = self.rng.random_range(-9999.0_f32..9999.0);
+            self.wind_idx = self.rng.random_range(-9999_i32..9999) as f32;
+            self.torque_idx = self.rng.random_range(-9999_i32..9999) as f32;
         }
 
         // Create legs with revolute joints
@@ -526,8 +523,15 @@ impl LunarLanderEnv {
         self.world = Some(world);
         self.prev_shaping = None;
 
-        // Perform one no-op step to get initial observation
-        self.do_step(&StepAction::Nop).0
+        // Perform one no-op step to get initial observation.
+        // Must use the actual action path (not Nop) so that dispersion RNG
+        // values are consumed, keeping the random stream aligned with Gymnasium.
+        let init_action = if self.continuous {
+            StepAction::Continuous(0.0, 0.0)
+        } else {
+            StepAction::Discrete(0)
+        };
+        self.do_step(&init_action).0
     }
 
     /// Compute the 8-dimensional state vector from current `Box2D` state.

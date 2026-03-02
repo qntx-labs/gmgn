@@ -655,9 +655,10 @@ impl BipedalWalkerEnv {
         for _ in 0..num_clouds {
             let x = self.rng.random_range(0.0..(TERRAIN_LENGTH as f32)) * TERRAIN_STEP;
             let y = VIEWPORT_H / SCALE * 3.0 / 4.0;
+            #[allow(clippy::approx_constant)] // Gymnasium intentionally uses 3.14, not math.pi
             let poly: Vec<(f32, f32)> = (0..5)
                 .map(|a| {
-                    let angle = PI * 2.0 * a as f32 / 5.0;
+                    let angle = 3.14 * 2.0 * a as f32 / 5.0;
                     let px = x
                         + 15.0 * TERRAIN_STEP * angle.sin()
                         + self.rng.random_range(0.0..5.0 * TERRAIN_STEP);

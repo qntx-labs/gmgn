@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "gmgn"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "box2d-rs",
  "minifb",
