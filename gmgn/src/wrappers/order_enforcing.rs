@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `OrderEnforcing`](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.OrderEnforcing).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, ResetResult, StepResult};
 use crate::error::{Error, Result};
+use crate::macros::delegate_env;
 
 /// Ensures that [`reset`](Env::reset) is called before [`step`](Env::step) or
 /// [`render`](Env::render).
@@ -84,28 +85,14 @@ impl<E: Env> Env for OrderEnforcing<E> {
         self.env.reset(seed)
     }
 
-    fn render(&mut self) -> Result<RenderFrame> {
+    fn render(&mut self) -> Result<crate::env::RenderFrame> {
         if !self.has_reset {
             return Err(Error::ResetNeeded { method: "render" });
         }
         self.env.render()
     }
 
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env, close, render_mode, observation_space, action_space);
 }
 
 #[cfg(test)]

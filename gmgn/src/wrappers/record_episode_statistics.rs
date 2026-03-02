@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `RecordEpisodeStatistics`](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.RecordEpisodeStatistics).
 
-use crate::env::{Env, InfoValue, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, InfoValue, ResetResult, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 
 /// Tracks per-episode reward and length, injecting them into the `info` dict
 /// on the step that ends the episode (`terminated || truncated`).
@@ -93,25 +94,7 @@ impl<E: Env> Env for RecordEpisodeStatistics<E> {
         self.env.reset(seed)
     }
 
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env);
 }
 
 #[cfg(test)]

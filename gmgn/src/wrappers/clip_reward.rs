@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `ClipReward`](https://gymnasium.farama.org/api/wrappers/reward_wrappers/#gymnasium.wrappers.ClipReward).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 
 /// Clips the reward returned by [`step`](Env::step) to `[min_reward, max_reward]`.
 ///
@@ -75,29 +76,15 @@ impl<E: Env> Env for ClipReward<E> {
         Ok(result)
     }
 
-    fn reset(&mut self, seed: Option<u64>) -> Result<ResetResult<Self::Obs>> {
-        self.env.reset(seed)
-    }
-
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(
+        env,
+        reset,
+        render,
+        close,
+        render_mode,
+        observation_space,
+        action_space
+    );
 }
 
 #[cfg(test)]

@@ -101,11 +101,13 @@ pub struct EnvMetadata {
     pub render_fps: Option<u32>,
 }
 
-/// Default metadata for environments that do not override it.
-pub static DEFAULT_METADATA: EnvMetadata = EnvMetadata {
-    render_modes: &[],
-    render_fps: None,
-};
+impl EnvMetadata {
+    /// Default metadata for environments that do not specify capabilities.
+    pub const DEFAULT: Self = Self {
+        render_modes: &[],
+        render_fps: None,
+    };
+}
 
 /// A reinforcement learning environment.
 ///
@@ -179,7 +181,7 @@ pub trait Env {
     fn render_mode(&self) -> &RenderMode;
 
     /// Static metadata about this environment's capabilities.
-    fn metadata(&self) -> &EnvMetadata {
-        &DEFAULT_METADATA
+    fn metadata(&self) -> EnvMetadata {
+        EnvMetadata::DEFAULT
     }
 }

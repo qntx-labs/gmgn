@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `NormalizeReward`](https://gymnasium.farama.org/api/wrappers/reward_wrappers/#gymnasium.wrappers.NormalizeReward).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, ResetResult, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 
 /// Normalizes rewards using a running discounted return variance estimate.
 ///
@@ -112,25 +113,7 @@ impl<E: Env> Env for NormalizeReward<E> {
         self.env.reset(seed)
     }
 
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env);
 }
 
 #[cfg(test)]

@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `NormalizeObservation`](https://gymnasium.farama.org/api/wrappers/observation_wrappers/#gymnasium.wrappers.NormalizeObservation).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, ResetResult, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 
 /// Normalizes observations using a running mean and variance estimate.
 ///
@@ -117,25 +118,7 @@ impl<E: Env<Obs = Vec<f32>>> Env for NormalizeObservation<E> {
         Ok(result)
     }
 
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env);
 }
 
 #[cfg(test)]

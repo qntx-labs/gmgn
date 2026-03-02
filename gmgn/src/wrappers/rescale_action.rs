@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `RescaleAction`](https://gymnasium.farama.org/api/wrappers/action_wrappers/#gymnasium.wrappers.RescaleAction).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, StepResult};
 use crate::error::{Error, Result};
+use crate::macros::delegate_env;
 use crate::space::BoundedSpace;
 
 /// Rescales continuous actions from `[min_action, max_action]` to the inner
@@ -117,29 +118,11 @@ impl<E: Env<Act = Vec<f32>, ActSpace = BoundedSpace>> Env for RescaleAction<E> {
         self.env.step(&mapped)
     }
 
-    fn reset(&mut self, seed: Option<u64>) -> Result<ResetResult<Self::Obs>> {
-        self.env.reset(seed)
-    }
-
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
     fn action_space(&self) -> &Self::ActSpace {
         &self.new_space
     }
 
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env, reset, render, close, render_mode, observation_space);
 }
 
 #[cfg(test)]

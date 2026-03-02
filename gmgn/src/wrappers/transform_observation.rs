@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `TransformObservation`](https://gymnasium.farama.org/api/wrappers/observation_wrappers/#gymnasium.wrappers.TransformObservation).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, ResetResult, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 use crate::space::Space;
 
 /// Applies a user-supplied function `f(obs) -> new_obs` to every observation
@@ -116,25 +117,11 @@ where
         })
     }
 
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
     fn observation_space(&self) -> &Self::ObsSpace {
         &self.obs_space
     }
 
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(env, render, close, render_mode, action_space);
 }
 
 #[cfg(test)]

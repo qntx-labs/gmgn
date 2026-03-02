@@ -7,13 +7,17 @@
 //! created through type-erased factory closures stored in a thread-safe
 //! global registry.
 
+mod dyn_env;
+mod dyn_value;
+
 use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock};
 
+pub use dyn_env::DynEnv;
+pub use dyn_value::DynValue;
+
 use crate::env::RenderMode;
-use crate::env::{RenderFrame, ResetResult, StepResult};
 use crate::error::{Error, Result};
-use crate::space::SpaceInfo;
 
 /// Metadata and factory for a registered environment.
 ///
@@ -36,248 +40,6 @@ impl std::fmt::Debug for EnvSpec {
             .field("max_episode_steps", &self.max_episode_steps)
             .field("reward_threshold", &self.reward_threshold)
             .finish_non_exhaustive()
-    }
-}
-
-/// A dynamically-typed reinforcement learning environment value.
-///
-/// Used by [`ActionValue`] and [`ObsValue`] for type-erased observations and
-/// actions flowing through the registry's [`DynEnv`] interface.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DynValue {
-    /// Flat continuous vector (e.g. from [`BoundedSpace`](crate::space::BoundedSpace)).
-    Continuous(Vec<f32>),
-    /// Single discrete integer (e.g. from [`Discrete`](crate::space::Discrete)).
-    Discrete(i64),
-    /// Heterogeneous tuple of values (e.g. from [`Tuple2`](crate::space::Tuple2) /
-    /// [`Tuple3`](crate::space::Tuple3)).
-    Tuple(Vec<Self>),
-    /// Multi-discrete integer vector (e.g. from [`MultiDiscrete`](crate::space::MultiDiscrete)).
-    MultiDiscrete(Vec<i64>),
-    /// Multi-binary byte vector (e.g. from [`MultiBinary`](crate::space::MultiBinary)).
-    MultiBinary(Vec<u8>),
-    /// Named dictionary of values (e.g. from `DictSpace`).
-    Dict(HashMap<String, Self>),
-    /// Text string value (e.g. from `TextSpace`).
-    Text(String),
-}
-
-/// A type-erased environment that operates on [`DynValue`].
-///
-/// Every concrete `Env` whose observation/action types can convert to/from
-/// [`DynValue`] automatically implements `DynEnv` via the blanket impl below.
-pub trait DynEnv: std::fmt::Debug {
-    /// Advance one timestep.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the action type mismatches or the inner env fails.
-    fn step_dyn(&mut self, action: &DynValue) -> Result<StepResult<DynValue>>;
-
-    /// Reset to initial state.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the inner environment fails to reset.
-    fn reset_dyn(&mut self, seed: Option<u64>) -> Result<ResetResult<DynValue>>;
-
-    /// Render a frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if rendering is unsupported or the env is not reset.
-    fn render_dyn(&mut self) -> Result<RenderFrame>;
-
-    /// Clean up resources.
-    fn close_dyn(&mut self);
-
-    /// Runtime description of the observation space.
-    fn observation_space_info(&self) -> SpaceInfo;
-
-    /// Runtime description of the action space.
-    fn action_space_info(&self) -> SpaceInfo;
-}
-
-use crate::env::Env;
-use crate::space::Space;
-
-impl<E> DynEnv for E
-where
-    E: Env + std::fmt::Debug,
-    E::Obs: Into<DynValue>,
-    E::Act: TryFrom<DynValue, Error = Error>,
-    E::ObsSpace: Space,
-    E::ActSpace: Space,
-{
-    fn step_dyn(&mut self, action: &DynValue) -> Result<StepResult<DynValue>> {
-        let act = E::Act::try_from(action.clone())?;
-        let r = self.step(&act)?;
-        Ok(StepResult {
-            obs: r.obs.into(),
-            reward: r.reward,
-            terminated: r.terminated,
-            truncated: r.truncated,
-            info: r.info,
-        })
-    }
-
-    fn reset_dyn(&mut self, seed: Option<u64>) -> Result<ResetResult<DynValue>> {
-        let r = self.reset(seed)?;
-        Ok(ResetResult {
-            obs: r.obs.into(),
-            info: r.info,
-        })
-    }
-
-    fn render_dyn(&mut self) -> Result<RenderFrame> {
-        self.render()
-    }
-
-    fn close_dyn(&mut self) {
-        self.close();
-    }
-
-    fn observation_space_info(&self) -> SpaceInfo {
-        self.observation_space().space_info()
-    }
-
-    fn action_space_info(&self) -> SpaceInfo {
-        self.action_space().space_info()
-    }
-}
-
-impl From<Vec<f32>> for DynValue {
-    fn from(v: Vec<f32>) -> Self {
-        Self::Continuous(v)
-    }
-}
-
-impl From<i64> for DynValue {
-    fn from(v: i64) -> Self {
-        Self::Discrete(v)
-    }
-}
-
-impl TryFrom<DynValue> for Vec<f32> {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::Continuous(c) => Ok(c),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected Continuous, got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl TryFrom<DynValue> for i64 {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::Discrete(d) => Ok(d),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected Discrete, got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl From<(i64, i64, i64)> for DynValue {
-    fn from(v: (i64, i64, i64)) -> Self {
-        Self::Tuple(vec![
-            Self::Discrete(v.0),
-            Self::Discrete(v.1),
-            Self::Discrete(v.2),
-        ])
-    }
-}
-
-impl TryFrom<DynValue> for (i64, i64, i64) {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::Tuple(elems) if elems.len() == 3 => {
-                let a = i64::try_from(elems[0].clone())?;
-                let b = i64::try_from(elems[1].clone())?;
-                let c = i64::try_from(elems[2].clone())?;
-                Ok((a, b, c))
-            }
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected Tuple(3×Discrete), got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl From<Vec<i64>> for DynValue {
-    fn from(v: Vec<i64>) -> Self {
-        Self::MultiDiscrete(v)
-    }
-}
-
-impl TryFrom<DynValue> for Vec<i64> {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::MultiDiscrete(d) => Ok(d),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected MultiDiscrete, got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl From<Vec<u8>> for DynValue {
-    fn from(v: Vec<u8>) -> Self {
-        Self::MultiBinary(v)
-    }
-}
-
-impl TryFrom<DynValue> for Vec<u8> {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::MultiBinary(b) => Ok(b),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected MultiBinary, got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl From<String> for DynValue {
-    fn from(v: String) -> Self {
-        Self::Text(v)
-    }
-}
-
-impl TryFrom<DynValue> for String {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::Text(s) => Ok(s),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected Text, got {other:?}"),
-            }),
-        }
-    }
-}
-
-impl From<HashMap<String, Self>> for DynValue {
-    fn from(v: HashMap<String, Self>) -> Self {
-        Self::Dict(v)
-    }
-}
-
-impl<S: ::std::hash::BuildHasher + Default> TryFrom<DynValue> for HashMap<String, DynValue, S> {
-    type Error = Error;
-    fn try_from(v: DynValue) -> Result<Self> {
-        match v {
-            DynValue::Dict(d) => Ok(d.into_iter().collect()),
-            other => Err(Error::TypeMismatch {
-                reason: format!("expected Dict, got {other:?}"),
-            }),
-        }
     }
 }
 
@@ -364,7 +126,6 @@ pub fn list_registered() -> Vec<String> {
 ///
 /// Called automatically from `lib.rs` crate initialization.
 pub fn register_builtins() {
-    // CartPole-v1
     let _ = register(EnvSpec {
         id: "CartPole-v1".to_owned(),
         max_episode_steps: Some(500),
@@ -379,7 +140,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // MountainCar-v0
     let _ = register(EnvSpec {
         id: "MountainCar-v0".to_owned(),
         max_episode_steps: Some(200),
@@ -394,7 +154,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // Pendulum-v1
     let _ = register(EnvSpec {
         id: "Pendulum-v1".to_owned(),
         max_episode_steps: Some(200),
@@ -409,7 +168,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // MountainCarContinuous-v0
     let _ = register(EnvSpec {
         id: "MountainCarContinuous-v0".to_owned(),
         max_episode_steps: Some(999),
@@ -426,7 +184,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // Acrobot-v1
     let _ = register(EnvSpec {
         id: "Acrobot-v1".to_owned(),
         max_episode_steps: Some(500),
@@ -438,7 +195,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // FrozenLake-v1 (4×4)
     let _ = register(EnvSpec {
         id: "FrozenLake-v1".to_owned(),
         max_episode_steps: Some(100),
@@ -453,7 +209,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // FrozenLake8x8-v1
     let _ = register(EnvSpec {
         id: "FrozenLake8x8-v1".to_owned(),
         max_episode_steps: Some(200),
@@ -469,7 +224,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // Taxi-v3
     let _ = register(EnvSpec {
         id: "Taxi-v3".to_owned(),
         max_episode_steps: Some(200),
@@ -481,7 +235,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // CliffWalking-v1
     let _ = register(EnvSpec {
         id: "CliffWalking-v1".to_owned(),
         max_episode_steps: None,
@@ -493,7 +246,6 @@ pub fn register_builtins() {
         }),
     });
 
-    // Blackjack-v1
     let _ = register(EnvSpec {
         id: "Blackjack-v1".to_owned(),
         max_episode_steps: None,
@@ -511,11 +263,10 @@ pub fn register_builtins() {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic)] // Panics are acceptable in test assertions.
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 
-    // Ensure builtins are registered before each test module run.
     fn setup() {
         register_builtins();
     }

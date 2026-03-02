@@ -33,6 +33,8 @@
 //! let step = env.step_dyn(&DynValue::Discrete(1)).unwrap();
 //! ```
 
+mod macros;
+
 pub mod env;
 pub mod env_checker;
 pub mod envs;

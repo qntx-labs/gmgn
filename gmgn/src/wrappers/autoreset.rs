@@ -2,8 +2,9 @@
 //!
 //! Mirrors [Gymnasium `Autoreset`](https://gymnasium.farama.org/api/wrappers/misc_wrappers/#gymnasium.wrappers.Autoreset).
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::env::{Env, StepResult};
 use crate::error::Result;
+use crate::macros::delegate_env;
 
 /// Automatically resets the environment when `terminated` or `truncated`
 /// is `true`, returning the new episode's initial observation.
@@ -82,29 +83,15 @@ impl<E: Env> Env for Autoreset<E> {
         Ok(result)
     }
 
-    fn reset(&mut self, seed: Option<u64>) -> Result<ResetResult<Self::Obs>> {
-        self.env.reset(seed)
-    }
-
-    fn render(&mut self) -> Result<RenderFrame> {
-        self.env.render()
-    }
-
-    fn close(&mut self) {
-        self.env.close();
-    }
-
-    fn observation_space(&self) -> &Self::ObsSpace {
-        self.env.observation_space()
-    }
-
-    fn action_space(&self) -> &Self::ActSpace {
-        self.env.action_space()
-    }
-
-    fn render_mode(&self) -> &RenderMode {
-        self.env.render_mode()
-    }
+    delegate_env!(
+        env,
+        reset,
+        render,
+        close,
+        render_mode,
+        observation_space,
+        action_space
+    );
 }
 
 #[cfg(test)]
