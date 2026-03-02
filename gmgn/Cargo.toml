@@ -13,6 +13,7 @@ render = ["dep:tiny-skia", "dep:minifb"]
 [dependencies]
 thiserror.workspace = true
 rand.workspace = true
+rand_distr.workspace = true
 rand_pcg.workspace = true
 rayon.workspace = true
 tiny-skia = { workspace = true, optional = true }

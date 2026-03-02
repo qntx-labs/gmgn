@@ -1,6 +1,7 @@
 //! A continuous box in ℝⁿ defined by per-element lower and upper bounds.
 
 use rand::RngExt as _;
+use rand_distr::{Exp, StandardNormal};
 
 use crate::error::{Error, Result};
 use crate::rng::Rng;
@@ -89,6 +90,12 @@ impl Space for BoundedSpace {
     type Element = Vec<f32>;
 
     fn sample(&self, rng: &mut Rng) -> Vec<f32> {
+        // Matches Gymnasium Box.sample() distribution per interval type:
+        //   [a, b]      → Uniform
+        //   [a, +∞)     → shifted Exponential
+        //   (−∞, b]     → shifted negative Exponential
+        //   (−∞, +∞)    → Standard Normal
+        let exp = Exp::new(1.0_f32).expect("lambda=1 is valid");
         self.low
             .iter()
             .zip(self.high.iter())
@@ -96,14 +103,14 @@ impl Space for BoundedSpace {
                 if lo.is_finite() && hi.is_finite() {
                     rng.random_range(lo..=hi)
                 } else if lo.is_finite() {
-                    // [lo, +inf): sample from exponential shifted by lo
-                    lo + rng.random_range(0.0_f32..1e6)
+                    // [lo, +inf): shifted exponential distribution
+                    lo + rng.sample(exp)
                 } else if hi.is_finite() {
-                    // (-inf, hi]: sample from negative exponential shifted by hi
-                    hi - rng.random_range(0.0_f32..1e6)
+                    // (-inf, hi]: shifted negative exponential distribution
+                    hi - rng.sample(exp)
                 } else {
-                    // (-inf, +inf): sample from a wide range
-                    rng.random_range(-1e6_f32..1e6)
+                    // (-inf, +inf): standard normal distribution
+                    rng.sample::<f32, _>(StandardNormal)
                 }
             })
             .collect()

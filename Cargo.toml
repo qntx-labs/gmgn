@@ -13,6 +13,7 @@ description = "A reinforcement learning environments library for Rust."
 [workspace.dependencies]
 thiserror = "2"
 rand = "0.10"
+rand_distr = "0.6"
 rand_pcg = "0.10"
 rayon = "1"
 tiny-skia = "0.12.0"

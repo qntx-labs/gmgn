@@ -28,6 +28,8 @@ pub enum InfoValue {
     String(String),
     /// Array of integers (e.g. action masks).
     IntArray(Vec<i64>),
+    /// Array of floats (e.g. observation vectors, reward histories).
+    FloatArray(Vec<f64>),
 }
 
 /// Auxiliary diagnostic information returned alongside observations.
