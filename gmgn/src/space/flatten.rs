@@ -205,6 +205,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn bounded_flatten_unflatten() {
         let value = vec![1.0_f32, -0.5, 3.14];
         let flat = flatten_bounded(&value);
