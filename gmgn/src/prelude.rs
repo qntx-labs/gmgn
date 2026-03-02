@@ -9,6 +9,6 @@ pub use crate::env::{
 };
 pub use crate::error::{Error, Result};
 pub use crate::space::{
-    AnySpace, AnyValue, BoundedSpace, DictSpace, Discrete, MultiBinary, MultiDiscrete, Space,
-    SpaceInfo, TextSpace, Tuple2, Tuple3,
+    AnySpace, AnyValue, BoundedSpace, DictSpace, Discrete, GraphInstance, GraphSpace, MultiBinary,
+    MultiDiscrete, OneOf, SequenceSpace, Space, SpaceInfo, TextSpace, Tuple2, Tuple3,
 };

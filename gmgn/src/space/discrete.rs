@@ -75,7 +75,8 @@ impl Space for Discrete {
 
     fn space_info(&self) -> SpaceInfo {
         SpaceInfo::Discrete {
-            n: self.n.cast_signed(),
+            n: self.n,
+            start: self.start,
         }
     }
 }

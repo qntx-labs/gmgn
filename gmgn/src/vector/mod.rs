@@ -7,8 +7,10 @@
 //! adapted to Rust's ownership model.
 
 mod sync_vec;
+mod wrapper;
 
 pub use sync_vec::SyncVectorEnv;
+pub use wrapper::VecRecordEpisodeStatistics;
 
 use crate::env::{Info, RenderFrame};
 use crate::error::Result;

@@ -9,12 +9,14 @@
 
 mod dyn_env;
 mod dyn_value;
+mod env_id;
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock};
 
 pub use dyn_env::DynEnv;
 pub use dyn_value::DynValue;
+pub use env_id::EnvId;
 
 use crate::env::RenderMode;
 use crate::error::{Error, Result};

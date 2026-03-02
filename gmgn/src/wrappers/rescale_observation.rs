@@ -55,11 +55,10 @@ where
 
         let low = vec![min_obs; dim];
         let high = vec![max_obs; dim];
-        let new_space = BoundedSpace::new(low.clone(), high.clone()).map_err(|e| {
-            Error::InvalidSpace {
+        let new_space =
+            BoundedSpace::new(low.clone(), high.clone()).map_err(|e| Error::InvalidSpace {
                 reason: format!("failed to create rescaled observation space: {e}"),
-            }
-        })?;
+            })?;
 
         Ok(Self {
             env,

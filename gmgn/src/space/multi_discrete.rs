@@ -135,7 +135,7 @@ impl Space for MultiDiscrete {
 
     fn space_info(&self) -> SpaceInfo {
         SpaceInfo::MultiDiscrete {
-            nvec: self.nvec.iter().map(|&n| n.cast_signed()).collect(),
+            nvec: self.nvec.clone(),
         }
     }
 }

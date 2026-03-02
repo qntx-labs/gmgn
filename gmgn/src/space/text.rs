@@ -42,10 +42,7 @@ impl TextSpace {
     /// Panics if `charset` is empty or `min_length > max_length`.
     #[must_use]
     pub fn new(min_length: usize, max_length: usize, charset: &[char]) -> Self {
-        assert!(
-            !charset.is_empty(),
-            "TextSpace charset must not be empty"
-        );
+        assert!(!charset.is_empty(), "TextSpace charset must not be empty");
         assert!(
             min_length <= max_length,
             "min_length ({min_length}) must be <= max_length ({max_length})"
@@ -64,10 +61,9 @@ impl TextSpace {
     /// (`a-z`, `A-Z`, `0-9`).
     #[must_use]
     pub fn alphanumeric(min_length: usize, max_length: usize) -> Self {
-        let charset: Vec<char> =
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-                .chars()
-                .collect();
+        let charset: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            .chars()
+            .collect();
         Self::new(min_length, max_length, &charset)
     }
 
@@ -123,11 +119,9 @@ impl Space for TextSpace {
     }
 
     fn space_info(&self) -> SpaceInfo {
-        // TextSpace doesn't have a dedicated SpaceInfo variant yet.
-        // Represent as a bounded discrete range for now.
-        SpaceInfo::Discrete {
-            #[allow(clippy::cast_possible_wrap)]
-            n: self.max_length as i64,
+        SpaceInfo::Text {
+            min_length: self.min_length,
+            max_length: self.max_length,
         }
     }
 }
