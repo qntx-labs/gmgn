@@ -90,6 +90,23 @@ pub enum RenderFrame {
     },
 }
 
+/// Static metadata about an environment's capabilities.
+///
+/// Mirrors Gymnasium's `metadata` dict (e.g. `render_modes`, `render_fps`).
+#[derive(Debug, Clone, Copy)]
+pub struct EnvMetadata {
+    /// Supported render modes (e.g. `["human", "rgb_array"]`).
+    pub render_modes: &'static [&'static str],
+    /// Target frames per second for rendering (`None` = unspecified).
+    pub render_fps: Option<u32>,
+}
+
+/// Default metadata for environments that do not override it.
+pub static DEFAULT_METADATA: EnvMetadata = EnvMetadata {
+    render_modes: &[],
+    render_fps: None,
+};
+
 /// A reinforcement learning environment.
 ///
 /// This is the core trait that all environments must implement. It mirrors
@@ -160,4 +177,9 @@ pub trait Env {
 
     /// The render mode configured for this environment.
     fn render_mode(&self) -> &RenderMode;
+
+    /// Static metadata about this environment's capabilities.
+    fn metadata(&self) -> &EnvMetadata {
+        &DEFAULT_METADATA
+    }
 }
