@@ -43,5 +43,4 @@ pub mod render;
 pub mod rng;
 pub mod space;
 pub mod vector;
-pub mod wrapper;
 pub mod wrappers;
