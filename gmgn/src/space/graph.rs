@@ -78,18 +78,18 @@ impl Space for GraphSpace {
     type Element = GraphInstance;
 
     fn sample(&self, rng: &mut Rng) -> GraphInstance {
-        // Sample a small random graph (1..=10 nodes, 0..=2*nodes edges).
+        // Sample a small random graph (1..=10 nodes).
         let num_nodes = rng.random_range(1_usize..=10);
         let nodes: Vec<AnyValue> = (0..num_nodes)
             .map(|_| self.node_space.sample(rng))
             .collect();
 
         let (edges, edge_links) = self.edge_space.as_ref().map_or((None, None), |es| {
-            let max_edges = num_nodes.saturating_mul(2);
-            let num_edges = if max_edges == 0 {
-                0
+            // Match Gymnasium: max edges = n*(n-1), edges only when n > 1.
+            let num_edges = if num_nodes > 1 {
+                rng.random_range(0..num_nodes.saturating_mul(num_nodes - 1))
             } else {
-                rng.random_range(0..=max_edges)
+                0
             };
             let edge_vals: Vec<AnyValue> = (0..num_edges).map(|_| es.sample(rng)).collect();
             let links: Vec<(usize, usize)> = (0..num_edges)
