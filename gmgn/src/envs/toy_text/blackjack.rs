@@ -200,7 +200,7 @@ impl BlackjackEnv {
         clippy::cast_sign_loss,
         clippy::cast_possible_wrap,
         clippy::many_single_char_names,
-        clippy::comparison_chain,
+        clippy::comparison_chain
     )]
     fn render_pixels(&mut self) -> Result<RenderFrame> {
         if self.player.is_empty() {

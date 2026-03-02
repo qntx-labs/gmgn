@@ -685,6 +685,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::panic)]
     fn reset_includes_action_mask() {
         let mut env = make_env();
         let r = env.reset(Some(42)).unwrap();
@@ -702,6 +703,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::panic)]
     fn step_includes_action_mask() {
         let mut env = make_env();
         env.reset(Some(42)).unwrap();
