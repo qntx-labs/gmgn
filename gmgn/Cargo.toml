@@ -21,5 +21,13 @@ tiny-skia = { workspace = true, optional = true }
 minifb = { workspace = true, optional = true }
 box2d-rs = { workspace = true, optional = true }
 
+[[example]]
+name = "lunar_lander"
+required-features = ["box2d"]
+
+[[example]]
+name = "bipedal_walker"
+required-features = ["box2d"]
+
 [lints]
 workspace = true

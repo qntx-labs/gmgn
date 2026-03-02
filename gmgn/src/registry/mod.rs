@@ -503,6 +503,36 @@ pub fn register_builtins() {
                 Ok(Box::new(env))
             }),
         });
+
+        let _ = register(EnvSpec {
+            id: "BipedalWalker-v3".to_owned(),
+            max_episode_steps: Some(1600),
+            reward_threshold: Some(300.0),
+            order_enforce: true,
+            factory: Box::new(|rm| {
+                use crate::envs::box2d::{BipedalWalkerConfig, BipedalWalkerEnv};
+                let env = BipedalWalkerEnv::new(BipedalWalkerConfig {
+                    render_mode: rm,
+                    ..BipedalWalkerConfig::default()
+                })?;
+                Ok(Box::new(env))
+            }),
+        });
+
+        let _ = register(EnvSpec {
+            id: "BipedalWalkerHardcore-v3".to_owned(),
+            max_episode_steps: Some(2000),
+            reward_threshold: Some(300.0),
+            order_enforce: true,
+            factory: Box::new(|rm| {
+                use crate::envs::box2d::{BipedalWalkerConfig, BipedalWalkerEnv};
+                let env = BipedalWalkerEnv::new(BipedalWalkerConfig {
+                    hardcore: true,
+                    render_mode: rm,
+                })?;
+                Ok(Box::new(env))
+            }),
+        });
     }
 }
 
@@ -570,7 +600,11 @@ mod tests {
         assert!(ids.contains(&"CliffWalking-v1".to_owned()));
         assert!(ids.contains(&"Blackjack-v1".to_owned()));
         #[cfg(feature = "box2d")]
-        assert!(ids.contains(&"LunarLander-v3".to_owned()));
+        {
+            assert!(ids.contains(&"LunarLander-v3".to_owned()));
+            assert!(ids.contains(&"BipedalWalker-v3".to_owned()));
+            assert!(ids.contains(&"BipedalWalkerHardcore-v3".to_owned()));
+        }
     }
 
     #[cfg(feature = "box2d")]
@@ -581,6 +615,32 @@ mod tests {
         let r = env.reset_dyn(Some(42)).unwrap();
         if let DynValue::Continuous(obs) = &r.obs {
             assert_eq!(obs.len(), 8);
+        } else {
+            panic!("expected Continuous observation, got {:?}", r.obs);
+        }
+    }
+
+    #[cfg(feature = "box2d")]
+    #[test]
+    fn make_bipedal_walker() {
+        setup();
+        let mut env = make("BipedalWalker-v3").unwrap();
+        let r = env.reset_dyn(Some(42)).unwrap();
+        if let DynValue::Continuous(obs) = &r.obs {
+            assert_eq!(obs.len(), 24);
+        } else {
+            panic!("expected Continuous observation, got {:?}", r.obs);
+        }
+    }
+
+    #[cfg(feature = "box2d")]
+    #[test]
+    fn make_bipedal_walker_hardcore() {
+        setup();
+        let mut env = make("BipedalWalkerHardcore-v3").unwrap();
+        let r = env.reset_dyn(Some(42)).unwrap();
+        if let DynValue::Continuous(obs) = &r.obs {
+            assert_eq!(obs.len(), 24);
         } else {
             panic!("expected Continuous observation, got {:?}", r.obs);
         }
