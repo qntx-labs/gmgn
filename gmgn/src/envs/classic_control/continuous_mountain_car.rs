@@ -11,15 +11,14 @@
 
 use std::collections::HashMap;
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
-use crate::error::{Error, Result};
-use crate::rng::{self, Rng};
-use crate::space::BoundedSpace;
-
 use rand::RngExt as _;
 
+use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::error::{Error, Result};
 #[cfg(feature = "render")]
 use crate::render::{Canvas, RenderWindow};
+use crate::rng::{self, Rng};
+use crate::space::BoundedSpace;
 
 const MIN_POSITION: f64 = -1.2;
 const MAX_POSITION: f64 = 0.6;
@@ -192,15 +191,13 @@ impl ContinuousMountainCarEnv {
         let hw = CAR_WIDTH / 2.0;
         let hh = CAR_HEIGHT;
 
-        let corners_local: [(f32, f32); 4] =
-            [(-hw, 0.0), (-hw, hh), (hw, hh), (hw, 0.0)];
+        let corners_local: [(f32, f32); 4] = [(-hw, 0.0), (-hw, hh), (hw, hh), (hw, 0.0)];
 
         let car_corners: Vec<(f32, f32)> = corners_local
             .iter()
             .map(|&(lx, ly)| {
                 let rx = lx.mul_add(cos_a, -(ly * sin_a)) + car_world_x;
-                let ry = h as f32
-                    - (lx.mul_add(sin_a, ly * cos_a) + clearance + car_world_y);
+                let ry = h as f32 - (lx.mul_add(sin_a, ly * cos_a) + clearance + car_world_y);
                 (rx, ry)
             })
             .collect();
@@ -220,7 +217,14 @@ impl ContinuousMountainCarEnv {
         let flag_x = ((GOAL_POSITION - MIN_POSITION) * scale) as f32;
         let flag_y1 = Self::height(GOAL_POSITION).mul_add(-scale, h) as f32;
         let flag_y2 = flag_y1 - 50.0;
-        canvas.stroke_line(flag_x, flag_y1, flag_x, flag_y2, 2.0, tiny_skia::Color::BLACK);
+        canvas.stroke_line(
+            flag_x,
+            flag_y1,
+            flag_x,
+            flag_y2,
+            2.0,
+            tiny_skia::Color::BLACK,
+        );
 
         let flag_color = tiny_skia::Color::from_rgba8(204, 204, 0, 255);
         let flag_verts = vec![
