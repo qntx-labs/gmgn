@@ -11,6 +11,7 @@ mod dict;
 mod discrete;
 mod multi_binary;
 mod multi_discrete;
+mod text;
 mod tuple;
 
 pub use bounded::BoundedSpace;
@@ -18,6 +19,7 @@ pub use dict::{AnySpace, AnyValue, DictSpace};
 pub use discrete::Discrete;
 pub use multi_binary::MultiBinary;
 pub use multi_discrete::MultiDiscrete;
+pub use text::TextSpace;
 pub use tuple::{Tuple2, Tuple3};
 
 use crate::rng::Rng;
