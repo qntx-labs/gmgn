@@ -38,6 +38,42 @@ impl std::fmt::Debug for EnvSpec {
     }
 }
 
+/// Describes the structure of a [`Space`](crate::space::Space) at runtime.
+///
+/// Used by [`DynEnv`] to expose observation and action space metadata
+/// without requiring concrete generic types.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpaceInfo {
+    /// A discrete space with `n` possible values `{0, 1, ..., n-1}`.
+    Discrete {
+        /// The number of discrete values.
+        n: i64,
+    },
+    /// A bounded continuous space (box).
+    Bounded {
+        /// Lower bounds per dimension.
+        low: Vec<f32>,
+        /// Upper bounds per dimension.
+        high: Vec<f32>,
+        /// Shape of elements.
+        shape: Vec<usize>,
+    },
+    /// A multi-discrete space with per-dimension counts.
+    MultiDiscrete {
+        /// Number of discrete values per dimension.
+        nvec: Vec<i64>,
+    },
+    /// A multi-binary space with `n` binary elements.
+    MultiBinary {
+        /// Number of binary elements.
+        n: usize,
+    },
+    /// A tuple (product) of sub-spaces.
+    Tuple(Vec<SpaceInfo>),
+    /// A dictionary of named sub-spaces.
+    Dict(Vec<(String, SpaceInfo)>),
+}
+
 /// A dynamically-typed reinforcement learning environment value.
 ///
 /// Used by [`ActionValue`] and [`ObsValue`] for type-erased observations and
@@ -51,6 +87,14 @@ pub enum DynValue {
     /// Heterogeneous tuple of values (e.g. from [`Tuple2`](crate::space::Tuple2) /
     /// [`Tuple3`](crate::space::Tuple3)).
     Tuple(Vec<Self>),
+    /// Multi-discrete integer vector (e.g. from [`MultiDiscrete`](crate::space::MultiDiscrete)).
+    MultiDiscrete(Vec<i64>),
+    /// Multi-binary byte vector (e.g. from [`MultiBinary`](crate::space::MultiBinary)).
+    MultiBinary(Vec<u8>),
+    /// Named dictionary of values (e.g. from `DictSpace`).
+    Dict(HashMap<String, Self>),
+    /// Text string value (e.g. from `TextSpace`).
+    Text(String),
 }
 
 /// A type-erased environment that operates on [`DynValue`].
@@ -178,6 +222,78 @@ impl TryFrom<DynValue> for (i64, i64, i64) {
             }
             other => Err(Error::TypeMismatch {
                 reason: format!("expected Tuple(3×Discrete), got {other:?}"),
+            }),
+        }
+    }
+}
+
+impl From<Vec<i64>> for DynValue {
+    fn from(v: Vec<i64>) -> Self {
+        Self::MultiDiscrete(v)
+    }
+}
+
+impl TryFrom<DynValue> for Vec<i64> {
+    type Error = Error;
+    fn try_from(v: DynValue) -> Result<Self> {
+        match v {
+            DynValue::MultiDiscrete(d) => Ok(d),
+            other => Err(Error::TypeMismatch {
+                reason: format!("expected MultiDiscrete, got {other:?}"),
+            }),
+        }
+    }
+}
+
+impl From<Vec<u8>> for DynValue {
+    fn from(v: Vec<u8>) -> Self {
+        Self::MultiBinary(v)
+    }
+}
+
+impl TryFrom<DynValue> for Vec<u8> {
+    type Error = Error;
+    fn try_from(v: DynValue) -> Result<Self> {
+        match v {
+            DynValue::MultiBinary(b) => Ok(b),
+            other => Err(Error::TypeMismatch {
+                reason: format!("expected MultiBinary, got {other:?}"),
+            }),
+        }
+    }
+}
+
+impl From<String> for DynValue {
+    fn from(v: String) -> Self {
+        Self::Text(v)
+    }
+}
+
+impl TryFrom<DynValue> for String {
+    type Error = Error;
+    fn try_from(v: DynValue) -> Result<Self> {
+        match v {
+            DynValue::Text(s) => Ok(s),
+            other => Err(Error::TypeMismatch {
+                reason: format!("expected Text, got {other:?}"),
+            }),
+        }
+    }
+}
+
+impl From<HashMap<String, DynValue>> for DynValue {
+    fn from(v: HashMap<String, DynValue>) -> Self {
+        Self::Dict(v)
+    }
+}
+
+impl TryFrom<DynValue> for HashMap<String, DynValue> {
+    type Error = Error;
+    fn try_from(v: DynValue) -> Result<Self> {
+        match v {
+            DynValue::Dict(d) => Ok(d),
+            other => Err(Error::TypeMismatch {
+                reason: format!("expected Dict, got {other:?}"),
             }),
         }
     }
