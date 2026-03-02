@@ -48,6 +48,9 @@ pub enum DynValue {
     Continuous(Vec<f32>),
     /// Single discrete integer (e.g. from [`Discrete`](crate::space::Discrete)).
     Discrete(i64),
+    /// Heterogeneous tuple of values (e.g. from [`Tuple2`](crate::space::Tuple2) /
+    /// [`Tuple3`](crate::space::Tuple3)).
+    Tuple(Vec<Self>),
 }
 
 /// A type-erased environment that operates on [`DynValue`].
@@ -134,7 +137,7 @@ impl TryFrom<DynValue> for Vec<f32> {
     fn try_from(v: DynValue) -> Result<Self> {
         match v {
             DynValue::Continuous(c) => Ok(c),
-            other @ DynValue::Discrete(_) => Err(Error::TypeMismatch {
+            other => Err(Error::TypeMismatch {
                 reason: format!("expected Continuous, got {other:?}"),
             }),
         }
@@ -146,8 +149,35 @@ impl TryFrom<DynValue> for i64 {
     fn try_from(v: DynValue) -> Result<Self> {
         match v {
             DynValue::Discrete(d) => Ok(d),
-            other @ DynValue::Continuous(_) => Err(Error::TypeMismatch {
+            other => Err(Error::TypeMismatch {
                 reason: format!("expected Discrete, got {other:?}"),
+            }),
+        }
+    }
+}
+
+impl From<(i64, i64, i64)> for DynValue {
+    fn from(v: (i64, i64, i64)) -> Self {
+        Self::Tuple(vec![
+            Self::Discrete(v.0),
+            Self::Discrete(v.1),
+            Self::Discrete(v.2),
+        ])
+    }
+}
+
+impl TryFrom<DynValue> for (i64, i64, i64) {
+    type Error = Error;
+    fn try_from(v: DynValue) -> Result<Self> {
+        match v {
+            DynValue::Tuple(elems) if elems.len() == 3 => {
+                let a = i64::try_from(elems[0].clone())?;
+                let b = i64::try_from(elems[1].clone())?;
+                let c = i64::try_from(elems[2].clone())?;
+                Ok((a, b, c))
+            }
+            other => Err(Error::TypeMismatch {
+                reason: format!("expected Tuple(3×Discrete), got {other:?}"),
             }),
         }
     }
@@ -309,6 +339,77 @@ pub fn register_builtins() {
             Ok(Box::new(env))
         }),
     });
+
+    // FrozenLake-v1 (4×4)
+    let _ = register(EnvSpec {
+        id: "FrozenLake-v1".to_owned(),
+        max_episode_steps: Some(100),
+        reward_threshold: Some(0.70),
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{FrozenLakeConfig, FrozenLakeEnv};
+            let env = FrozenLakeEnv::new(FrozenLakeConfig {
+                render_mode: rm,
+                ..FrozenLakeConfig::default()
+            })?;
+            Ok(Box::new(env))
+        }),
+    });
+
+    // FrozenLake8x8-v1
+    let _ = register(EnvSpec {
+        id: "FrozenLake8x8-v1".to_owned(),
+        max_episode_steps: Some(200),
+        reward_threshold: Some(0.85),
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{FrozenLakeConfig, FrozenLakeEnv, MAP_8X8};
+            let env = FrozenLakeEnv::new(FrozenLakeConfig {
+                desc: MAP_8X8.iter().map(|s| (*s).to_owned()).collect(),
+                render_mode: rm,
+                ..FrozenLakeConfig::default()
+            })?;
+            Ok(Box::new(env))
+        }),
+    });
+
+    // Taxi-v3
+    let _ = register(EnvSpec {
+        id: "Taxi-v3".to_owned(),
+        max_episode_steps: Some(200),
+        reward_threshold: Some(8.0),
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{TaxiConfig, TaxiEnv};
+            let env = TaxiEnv::new(TaxiConfig { render_mode: rm });
+            Ok(Box::new(env))
+        }),
+    });
+
+    // CliffWalking-v1
+    let _ = register(EnvSpec {
+        id: "CliffWalking-v1".to_owned(),
+        max_episode_steps: None,
+        reward_threshold: None,
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{CliffWalkingConfig, CliffWalkingEnv};
+            let env = CliffWalkingEnv::new(CliffWalkingConfig { render_mode: rm });
+            Ok(Box::new(env))
+        }),
+    });
+
+    // Blackjack-v1
+    let _ = register(EnvSpec {
+        id: "Blackjack-v1".to_owned(),
+        max_episode_steps: None,
+        reward_threshold: None,
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{BlackjackConfig, BlackjackEnv};
+            let env = BlackjackEnv::new(BlackjackConfig {
+                sab: true,
+                natural: false,
+                render_mode: rm,
+            });
+            Ok(Box::new(env))
+        }),
+    });
 }
 
 #[cfg(test)]
@@ -370,6 +471,11 @@ mod tests {
         assert!(ids.contains(&"CartPole-v1".to_owned()));
         assert!(ids.contains(&"MountainCar-v0".to_owned()));
         assert!(ids.contains(&"Pendulum-v1".to_owned()));
+        assert!(ids.contains(&"FrozenLake-v1".to_owned()));
+        assert!(ids.contains(&"FrozenLake8x8-v1".to_owned()));
+        assert!(ids.contains(&"Taxi-v3".to_owned()));
+        assert!(ids.contains(&"CliffWalking-v1".to_owned()));
+        assert!(ids.contains(&"Blackjack-v1".to_owned()));
     }
 
     #[test]
@@ -382,6 +488,34 @@ mod tests {
             assert_eq!(obs.len(), 4);
         } else {
             panic!("expected Continuous observation");
+        }
+    }
+
+    #[test]
+    fn make_frozen_lake() {
+        setup();
+        let mut env = make("FrozenLake-v1").unwrap();
+        let r = env.reset_dyn(Some(0)).unwrap();
+        assert!(matches!(r.obs, DynValue::Discrete(_)));
+    }
+
+    #[test]
+    fn make_taxi() {
+        setup();
+        let mut env = make("Taxi-v3").unwrap();
+        let r = env.reset_dyn(Some(0)).unwrap();
+        assert!(matches!(r.obs, DynValue::Discrete(_)));
+    }
+
+    #[test]
+    fn make_blackjack() {
+        setup();
+        let mut env = make("Blackjack-v1").unwrap();
+        let r = env.reset_dyn(Some(42)).unwrap();
+        if let DynValue::Tuple(elems) = &r.obs {
+            assert_eq!(elems.len(), 3);
+        } else {
+            panic!("expected Tuple observation, got {:?}", r.obs);
         }
     }
 }

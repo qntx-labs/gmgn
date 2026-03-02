@@ -7,8 +7,7 @@
 
 use std::collections::HashMap;
 
-use rand::RngExt as _;
-
+use super::utils::categorical_sample;
 use crate::env::{Env, InfoValue, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
 use crate::rng::{self, Rng};
@@ -124,27 +123,10 @@ impl TaxiEnv {
         (taxi_row, taxi_col, pass_loc, dest_idx)
     }
 
-    /// Sample a state from a categorical distribution.
-    #[allow(clippy::cast_possible_wrap)]
-    fn categorical_sample(probs: &[f64], rng: &mut Rng) -> i64 {
-        let r: f64 = rng.random_range(0.0..1.0);
-        let mut cum = 0.0;
-        for (i, &p) in probs.iter().enumerate() {
-            cum += p;
-            if r < cum {
-                return i as i64;
-            }
-        }
-        (probs.len() - 1) as i64
-    }
-
     /// Create a new taxi environment.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the space cannot be constructed (should not happen).
     #[allow(clippy::cast_possible_wrap, clippy::needless_pass_by_value)]
-    pub fn new(config: TaxiConfig) -> Result<Self> {
+    #[must_use]
+    pub fn new(config: TaxiConfig) -> Self {
         let desc: Vec<Vec<u8>> = MAP.iter().map(|s| s.as_bytes().to_vec()).collect();
 
         #[allow(clippy::cast_possible_truncation)]
@@ -245,7 +227,7 @@ impl TaxiEnv {
             }
         }
 
-        Ok(Self {
+        Self {
             observation_space: Discrete::new(NUM_STATES),
             action_space: Discrete::new(NUM_ACTIONS),
             transitions,
@@ -255,7 +237,7 @@ impl TaxiEnv {
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
             initial_state_distrib,
-        })
+        }
     }
 }
 
@@ -281,7 +263,7 @@ impl Env for TaxiEnv {
         let trans = &self.transitions[s][a];
 
         let probs: Vec<f64> = trans.iter().map(|t| t.0).collect();
-        let idx = Self::categorical_sample(&probs, &mut self.rng) as usize;
+        let idx = categorical_sample(&probs, &mut self.rng);
         let (p, ns, reward, terminated) = trans[idx];
 
         self.state = Some(ns);
@@ -304,7 +286,8 @@ impl Env for TaxiEnv {
             self.rng = rng::create_rng(Some(s));
         }
 
-        let s = Self::categorical_sample(&self.initial_state_distrib, &mut self.rng);
+        #[allow(clippy::cast_possible_wrap)]
+        let s = categorical_sample(&self.initial_state_distrib, &mut self.rng) as i64;
         self.state = Some(s);
         self.last_action = None;
 
@@ -399,7 +382,7 @@ mod tests {
     use super::*;
 
     fn make_env() -> TaxiEnv {
-        TaxiEnv::new(TaxiConfig::default()).unwrap()
+        TaxiEnv::new(TaxiConfig::default())
     }
 
     #[test]

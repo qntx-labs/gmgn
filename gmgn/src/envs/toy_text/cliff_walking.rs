@@ -5,7 +5,7 @@
 //! sends the agent back to the start with −100 reward; all other moves
 //! cost −1.
 //!
-//! Mirrors [Gymnasium `CliffWalking-v0`](https://gymnasium.farama.org/environments/toy_text/cliff_walking/).
+//! Mirrors [Gymnasium `CliffWalking-v1`](https://gymnasium.farama.org/environments/toy_text/cliff_walking/).
 
 use std::collections::HashMap;
 
@@ -89,12 +89,9 @@ impl std::fmt::Debug for CliffWalkingEnv {
 
 impl CliffWalkingEnv {
     /// Create a new cliff walking environment.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the space cannot be constructed (should not happen).
     #[allow(clippy::cast_possible_wrap, clippy::needless_pass_by_value)]
-    pub fn new(config: CliffWalkingConfig) -> Result<Self> {
+    #[must_use]
+    pub fn new(config: CliffWalkingConfig) -> Self {
         let start_state = (3 * NUM_COLS) as i64; // [3, 0] = 36
         let goal_state = (3 * NUM_COLS + NUM_COLS - 1) as i64; // [3, 11] = 47
 
@@ -125,8 +122,12 @@ impl CliffWalkingEnv {
                     let li = &mut transitions[s as usize][a as usize];
 
                     let (dr, dc) = delta(a);
-                    let nr = (r as isize + dr).clamp(0, (NUM_ROWS - 1) as isize).cast_unsigned();
-                    let nc = (c as isize + dc).clamp(0, (NUM_COLS - 1) as isize).cast_unsigned();
+                    let nr = (r as isize + dr)
+                        .clamp(0, (NUM_ROWS - 1) as isize)
+                        .cast_unsigned();
+                    let nc = (c as isize + dc)
+                        .clamp(0, (NUM_COLS - 1) as isize)
+                        .cast_unsigned();
                     let ns = (nr * NUM_COLS + nc) as i64;
 
                     if is_cliff(nr, nc) {
@@ -140,7 +141,7 @@ impl CliffWalkingEnv {
             }
         }
 
-        Ok(Self {
+        Self {
             observation_space: Discrete::new(NUM_STATES),
             action_space: Discrete::new(NUM_ACTIONS),
             transitions,
@@ -149,7 +150,7 @@ impl CliffWalkingEnv {
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
             start_state,
-        })
+        }
     }
 }
 
@@ -280,7 +281,7 @@ mod tests {
     use super::*;
 
     fn make_env() -> CliffWalkingEnv {
-        CliffWalkingEnv::new(CliffWalkingConfig::default()).unwrap()
+        CliffWalkingEnv::new(CliffWalkingConfig::default())
     }
 
     #[test]

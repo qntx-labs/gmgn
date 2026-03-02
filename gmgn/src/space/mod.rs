@@ -10,11 +10,13 @@ mod bounded;
 mod discrete;
 mod multi_binary;
 mod multi_discrete;
+mod tuple;
 
 pub use bounded::BoundedSpace;
 pub use discrete::Discrete;
 pub use multi_binary::MultiBinary;
 pub use multi_discrete::MultiDiscrete;
+pub use tuple::{Tuple2, Tuple3};
 
 use crate::rng::Rng;
 

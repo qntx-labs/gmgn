@@ -9,8 +9,7 @@
 
 use std::collections::HashMap;
 
-use rand::RngExt as _;
-
+use super::utils::categorical_sample;
 use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
 use crate::rng::{self, Rng};
@@ -26,7 +25,6 @@ const UP: i64 = 3;
 pub const MAP_4X4: &[&str] = &["SFFF", "FHFH", "FFFH", "HFFG"];
 
 /// 8×8 pre-defined map.
-#[allow(dead_code)]
 pub const MAP_8X8: &[&str] = &[
     "SFFFFFFF", "FFFFFFFF", "FFFHFFFF", "FFFFFHFF", "FFFHFFFF", "FHHFFFHF", "FHFFHFHF", "FFFHFFFG",
 ];
@@ -217,20 +215,6 @@ impl FrozenLakeEnv {
             initial_state_distrib,
         })
     }
-
-    /// Sample a state from a categorical distribution.
-    #[allow(clippy::cast_possible_wrap)]
-    fn categorical_sample(probs: &[f64], rng: &mut Rng) -> i64 {
-        let r: f64 = rng.random_range(0.0..1.0);
-        let mut cum = 0.0;
-        for (i, &p) in probs.iter().enumerate() {
-            cum += p;
-            if r < cum {
-                return i as i64;
-            }
-        }
-        (probs.len() - 1) as i64
-    }
 }
 
 impl Env for FrozenLakeEnv {
@@ -256,7 +240,7 @@ impl Env for FrozenLakeEnv {
 
         // Sample from transition distribution.
         let probs: Vec<f64> = trans.iter().map(|t| t.0).collect();
-        let idx = Self::categorical_sample(&probs, &mut self.rng) as usize;
+        let idx = categorical_sample(&probs, &mut self.rng);
         let (_p, ns, reward, terminated) = trans[idx];
 
         self.state = Some(ns);
@@ -282,7 +266,8 @@ impl Env for FrozenLakeEnv {
             self.rng = rng::create_rng(Some(s));
         }
 
-        let s = Self::categorical_sample(&self.initial_state_distrib, &mut self.rng);
+        #[allow(clippy::cast_possible_wrap)]
+        let s = categorical_sample(&self.initial_state_distrib, &mut self.rng) as i64;
         self.state = Some(s);
         self.last_action = None;
 
