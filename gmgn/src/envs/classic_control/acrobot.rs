@@ -18,8 +18,10 @@ use crate::space::{BoundedSpace, Discrete, Space};
 
 use rand::RngExt as _;
 
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow};
+
 const LINK_LENGTH_1: f64 = 1.0;
-#[allow(dead_code)] // Retained for documentation parity with Gymnasium.
 const LINK_LENGTH_2: f64 = 1.0;
 const LINK_MASS_1: f64 = 1.0;
 const LINK_MASS_2: f64 = 1.0;
@@ -30,6 +32,11 @@ const GRAVITY: f64 = 9.8;
 const DT: f64 = 0.2;
 const MAX_VEL_1: f64 = 4.0 * PI;
 const MAX_VEL_2: f64 = 9.0 * PI;
+
+#[cfg(feature = "render")]
+const SCREEN_DIM: u32 = 500;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 15;
 
 /// Available torques mapped from discrete actions {0, 1, 2}.
 const AVAIL_TORQUE: [f64; 3] = [-1.0, 0.0, 1.0];
@@ -169,6 +176,11 @@ pub struct AcrobotEnv {
     state: Option<[f64; 4]>,
     rng: Rng,
     render_mode: RenderMode,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
 }
 
 impl std::fmt::Debug for AcrobotEnv {
@@ -197,6 +209,10 @@ impl AcrobotEnv {
             state: None,
             rng: rng::create_rng(None),
             render_mode: config.render_mode,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
         })
     }
 
@@ -218,6 +234,100 @@ impl AcrobotEnv {
     fn is_terminal(&self) -> bool {
         let [t1, t2, _, _] = self.state.expect("state must be initialized");
         -t1.cos() - (t2 + t1).cos() > 1.0
+    }
+
+    /// Render the acrobot scene to the internal canvas.
+    #[cfg(feature = "render")]
+    #[allow(clippy::cast_possible_truncation)]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.state.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+        let [t1, t2, _, _] = self.state.expect("checked above");
+
+        let canvas = self
+            .canvas
+            .get_or_insert_with(|| Canvas::new(SCREEN_DIM, SCREEN_DIM));
+
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        let bound = LINK_LENGTH_1 + LINK_LENGTH_2 + 0.2;
+        let scale = (f64::from(SCREEN_DIM) / (bound * 2.0)) as f32;
+        let offset = SCREEN_DIM as f32 / 2.0;
+
+        // First link: from pivot (offset, offset) to elbow.
+        let p1_x = ((LINK_LENGTH_1 * t1.sin()) as f32).mul_add(scale, offset);
+        let p1_y = ((LINK_LENGTH_1 * t1.cos()) as f32).mul_add(scale, offset);
+
+        // Second link tip: elbow + link2 direction.
+        let p2_x = (LINK_LENGTH_1.mul_add(t1.sin(), LINK_LENGTH_2 * (t1 + t2).sin()) as f32)
+            .mul_add(scale, offset);
+        let p2_y = (LINK_LENGTH_1.mul_add(t1.cos(), LINK_LENGTH_2 * (t1 + t2).cos()) as f32)
+            .mul_add(scale, offset);
+
+        // Target height line: -cos(t1) - cos(t1+t2) > 1.0
+        // This corresponds to tip_y (in world coords) = 1.0 above pivot.
+        let target_y = offset - scale;
+
+        let target_color = tiny_skia::Color::from_rgba8(0, 0, 0, 128);
+        canvas.stroke_line(
+            0.0,
+            target_y,
+            SCREEN_DIM as f32,
+            target_y,
+            1.0,
+            target_color,
+        );
+
+        // Draw links.
+        let link_color = tiny_skia::Color::from_rgba8(0, 119, 187, 255);
+        canvas.stroke_line(offset, offset, p1_x, p1_y, 6.0, link_color);
+
+        let link2_color = tiny_skia::Color::from_rgba8(0, 153, 68, 255);
+        canvas.stroke_line(p1_x, p1_y, p2_x, p2_y, 6.0, link2_color);
+
+        // Joints.
+        let joint_color = tiny_skia::Color::from_rgba8(51, 153, 51, 255);
+        canvas.fill_circle(offset, offset, 5.0, joint_color);
+        canvas.fill_circle(p1_x, p1_y, 5.0, joint_color);
+
+        // Tip.
+        canvas.fill_circle(
+            p2_x,
+            p2_y,
+            4.0,
+            tiny_skia::Color::from_rgba8(204, 0, 0, 255),
+        );
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "Acrobot \u{2014} gmgn",
+                        SCREEN_DIM as usize,
+                        SCREEN_DIM as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: SCREEN_DIM,
+                    height: SCREEN_DIM,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
     }
 }
 
@@ -293,6 +403,9 @@ impl Env for AcrobotEnv {
                     "Acrobot | θ₁: {t1:+.3} | θ₂: {t2:+.3} | ω₁: {dt1:+.3} | ω₂: {dt2:+.3}"
                 )))
             }
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
             _ => Err(Error::UnsupportedRenderMode {
                 mode: format!("{:?}", self.render_mode),
             }),

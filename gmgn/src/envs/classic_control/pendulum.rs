@@ -14,11 +14,19 @@ use crate::space::BoundedSpace;
 
 use rand::RngExt as _;
 
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow};
+
 const MAX_SPEED: f64 = 8.0;
 const MAX_TORQUE: f64 = 2.0;
 const DT: f64 = 0.05;
 const MASS: f64 = 1.0;
 const LENGTH: f64 = 1.0;
+
+#[cfg(feature = "render")]
+const SCREEN_DIM: u32 = 500;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 30;
 
 /// Configuration for [`PendulumEnv`].
 #[derive(Debug, Clone, Copy)]
@@ -79,9 +87,16 @@ pub struct PendulumEnv {
 
     /// Internal state: `[theta, theta_dot]`.
     state: Option<[f64; 2]>,
+    /// Last applied torque (for rendering the action indicator).
+    last_u: Option<f64>,
     rng: Rng,
     g: f64,
     render_mode: RenderMode,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
 }
 
 impl std::fmt::Debug for PendulumEnv {
@@ -112,9 +127,14 @@ impl PendulumEnv {
             observation_space: BoundedSpace::new(obs_low, obs_high)?,
             action_space: BoundedSpace::new(act_low, act_high)?,
             state: None,
+            last_u: None,
             rng: rng::create_rng(None),
             g: config.g,
             render_mode: config.render_mode,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
         })
     }
 
@@ -123,6 +143,89 @@ impl PendulumEnv {
     fn observation(&self) -> Vec<f32> {
         let [theta, theta_dot] = self.state.expect("state must be initialized");
         vec![theta.cos() as f32, theta.sin() as f32, theta_dot as f32]
+    }
+
+    /// Render the pendulum scene to the internal canvas.
+    #[cfg(feature = "render")]
+    #[allow(clippy::cast_possible_truncation)]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.state.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+        let [theta, _] = self.state.expect("checked above");
+
+        let canvas = self
+            .canvas
+            .get_or_insert_with(|| Canvas::new(SCREEN_DIM, SCREEN_DIM));
+
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        let center_x = SCREEN_DIM as f32 / 2.0;
+        let center_y = SCREEN_DIM as f32 / 2.0;
+        let rod_len = 150.0_f32;
+        let rod_width = 6.0_f32;
+
+        // Pendulum hangs downward when theta=0, so tip direction is (sin(θ), cos(θ)).
+        let tip_x = rod_len.mul_add(theta.sin() as f32, center_x);
+        let tip_y = rod_len.mul_add(theta.cos() as f32, center_y);
+
+        // Rod as a thick line.
+        let rod_color = tiny_skia::Color::from_rgba8(0, 119, 187, 255);
+        canvas.stroke_line(center_x, center_y, tip_x, tip_y, rod_width, rod_color);
+
+        // Bob at the tip.
+        canvas.fill_circle(tip_x, tip_y, 12.0, rod_color);
+
+        // Pivot circle.
+        canvas.fill_circle(center_x, center_y, 5.0, tiny_skia::Color::BLACK);
+
+        // Torque indicator arc (small colored bar at pivot).
+        if let Some(u) = self.last_u {
+            let bar_len = (u / MAX_TORQUE * 40.0) as f32;
+            let bar_color = if u >= 0.0 {
+                tiny_skia::Color::from_rgba8(255, 0, 0, 180)
+            } else {
+                tiny_skia::Color::from_rgba8(0, 0, 255, 180)
+            };
+            canvas.stroke_line(
+                center_x,
+                center_y - 15.0,
+                center_x + bar_len,
+                center_y - 15.0,
+                4.0,
+                bar_color,
+            );
+        }
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "Pendulum — gmgn",
+                        SCREEN_DIM as usize,
+                        SCREEN_DIM as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: SCREEN_DIM,
+                    height: SCREEN_DIM,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
     }
 }
 
@@ -141,6 +244,7 @@ impl Env for PendulumEnv {
 
         // Clip torque to valid range.
         let u = f64::from(action[0]).clamp(-MAX_TORQUE, MAX_TORQUE);
+        self.last_u = Some(u);
 
         // Cost (negative reward).
         let th_norm = angle_normalize(theta);
@@ -173,6 +277,7 @@ impl Env for PendulumEnv {
         let theta = self.rng.random_range(-PI..PI);
         let theta_dot = self.rng.random_range(-1.0..1.0);
         self.state = Some([theta, theta_dot]);
+        self.last_u = None;
 
         Ok(ResetResult {
             obs: self.observation(),
@@ -192,6 +297,9 @@ impl Env for PendulumEnv {
                     "Pendulum | θ: {theta:+.3} rad | θ̇: {theta_dot:+.3}"
                 )))
             }
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
             _ => Err(Error::UnsupportedRenderMode {
                 mode: format!("{:?}", self.render_mode),
             }),

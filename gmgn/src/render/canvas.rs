@@ -147,6 +147,35 @@ impl Canvas {
         }
     }
 
+    /// Draw an open polyline (not closed) through the given points.
+    pub fn stroke_polyline(&mut self, points: &[(f32, f32)], thickness: f32, color: Color) {
+        if points.len() < 2 {
+            return;
+        }
+
+        let mut paint = Paint::default();
+        paint.set_color(color);
+        paint.anti_alias = true;
+
+        let stroke = Stroke {
+            width: thickness,
+            line_cap: LineCap::Round,
+            ..Stroke::default()
+        };
+
+        if let Some(path) = {
+            let mut pb = PathBuilder::new();
+            pb.move_to(points[0].0, points[0].1);
+            for &(x, y) in &points[1..] {
+                pb.line_to(x, y);
+            }
+            pb.finish()
+        } {
+            self.pixmap
+                .stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+        }
+    }
+
     /// Draw an anti-aliased polygon outline.
     pub fn stroke_polygon(&mut self, vertices: &[(f32, f32)], thickness: f32, color: Color) {
         if vertices.len() < 3 {

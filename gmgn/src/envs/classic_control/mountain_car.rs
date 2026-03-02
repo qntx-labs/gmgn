@@ -18,12 +18,26 @@ use crate::space::{BoundedSpace, Discrete, Space};
 
 use rand::RngExt as _;
 
+#[cfg(feature = "render")]
+use crate::render::{Canvas, RenderWindow};
+
 const MIN_POSITION: f64 = -1.2;
 const MAX_POSITION: f64 = 0.6;
 const MAX_SPEED: f64 = 0.07;
 const GOAL_POSITION: f64 = 0.5;
 const FORCE: f64 = 0.001;
 const GRAVITY: f64 = 0.0025;
+
+#[cfg(feature = "render")]
+const SCREEN_WIDTH: u32 = 600;
+#[cfg(feature = "render")]
+const SCREEN_HEIGHT: u32 = 400;
+#[cfg(feature = "render")]
+const RENDER_FPS: usize = 30;
+#[cfg(feature = "render")]
+const CAR_WIDTH: f32 = 40.0;
+#[cfg(feature = "render")]
+const CAR_HEIGHT: f32 = 20.0;
 
 /// Configuration for [`MountainCarEnv`].
 #[derive(Debug, Clone, Copy)]
@@ -76,6 +90,11 @@ pub struct MountainCarEnv {
     rng: Rng,
     goal_velocity: f64,
     render_mode: RenderMode,
+
+    #[cfg(feature = "render")]
+    canvas: Option<Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<RenderWindow>,
 }
 
 impl std::fmt::Debug for MountainCarEnv {
@@ -106,6 +125,10 @@ impl MountainCarEnv {
             rng: rng::create_rng(None),
             goal_velocity: config.goal_velocity,
             render_mode: config.render_mode,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
         })
     }
 
@@ -114,6 +137,130 @@ impl MountainCarEnv {
     fn observation(&self) -> Vec<f32> {
         let s = self.state.expect("state must be initialized");
         vec![s[0] as f32, s[1] as f32]
+    }
+
+    /// Terrain height function: `sin(3x) * 0.45 + 0.55`.
+    #[cfg(feature = "render")]
+    fn height(x: f64) -> f64 {
+        (3.0 * x).sin().mul_add(0.45, 0.55)
+    }
+
+    /// Render the mountain car scene to the internal canvas.
+    #[cfg(feature = "render")]
+    #[allow(clippy::cast_possible_truncation)]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        if self.state.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+        let [pos, _vel] = self.state.expect("checked above");
+
+        let canvas = self
+            .canvas
+            .get_or_insert_with(|| Canvas::new(SCREEN_WIDTH, SCREEN_HEIGHT));
+
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        let world_width = MAX_POSITION - MIN_POSITION;
+        let scale = f64::from(SCREEN_WIDTH) / world_width;
+        let h = f64::from(SCREEN_HEIGHT);
+
+        // Draw terrain polyline.
+        let n_points = 100;
+        let terrain: Vec<(f32, f32)> = (0..=n_points)
+            .map(|i| {
+                let x = (MAX_POSITION - MIN_POSITION)
+                    .mul_add(f64::from(i) / f64::from(n_points), MIN_POSITION);
+                let sx = ((x - MIN_POSITION) * scale) as f32;
+                let sy = (h - Self::height(x) * scale) as f32;
+                (sx, sy)
+            })
+            .collect();
+        canvas.stroke_polyline(&terrain, 2.0, tiny_skia::Color::BLACK);
+
+        // Car position on the curve.
+        let car_sx = ((pos - MIN_POSITION) * scale) as f32;
+        let car_sy = Self::height(pos).mul_add(-scale, h) as f32;
+        let clearance = 10.0_f32;
+
+        // Car body (rotated rectangle following the slope).
+        let slope_angle = (3.0 * pos).cos() * 3.0 * 0.45;
+        let sin_a = (-slope_angle as f32).sin();
+        let cos_a = (-slope_angle as f32).cos();
+        let hw = CAR_WIDTH / 2.0;
+        let hh = CAR_HEIGHT;
+
+        let corners_local: [(f32, f32); 4] = [(-hw, 0.0), (-hw, -hh), (hw, -hh), (hw, 0.0)];
+
+        let car_corners: Vec<(f32, f32)> = corners_local
+            .iter()
+            .map(|&(lx, ly)| {
+                let rx = lx.mul_add(cos_a, -(ly * sin_a)) + car_sx;
+                let ry = lx.mul_add(sin_a, ly * cos_a) + car_sy - clearance;
+                (rx, ry)
+            })
+            .collect();
+
+        canvas.fill_polygon(&car_corners, tiny_skia::Color::BLACK);
+
+        // Wheels.
+        let wheel_radius = CAR_HEIGHT / 2.5;
+        let wheel_color = tiny_skia::Color::from_rgba8(128, 128, 128, 255);
+        for &offset in &[-(CAR_WIDTH / 4.0), CAR_WIDTH / 4.0] {
+            let wx = offset.mul_add(cos_a, car_sx);
+            let wy = offset.mul_add(sin_a, car_sy - clearance);
+            canvas.fill_circle(wx, wy, wheel_radius, wheel_color);
+        }
+
+        // Goal flag.
+        let flag_x = ((GOAL_POSITION - MIN_POSITION) * scale) as f32;
+        let flag_y1 = Self::height(GOAL_POSITION).mul_add(-scale, h) as f32;
+        let flag_y2 = flag_y1 - 50.0;
+        canvas.stroke_line(
+            flag_x,
+            flag_y1,
+            flag_x,
+            flag_y2,
+            2.0,
+            tiny_skia::Color::BLACK,
+        );
+
+        let flag_color = tiny_skia::Color::from_rgba8(204, 204, 0, 255);
+        let flag_verts = vec![
+            (flag_x, flag_y2),
+            (flag_x, flag_y2 + 10.0),
+            (flag_x + 25.0, flag_y2 + 5.0),
+        ];
+        canvas.fill_polygon(&flag_verts, flag_color);
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "MountainCar — gmgn",
+                        SCREEN_WIDTH as usize,
+                        SCREEN_HEIGHT as usize,
+                        RENDER_FPS,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: SCREEN_WIDTH,
+                    height: SCREEN_HEIGHT,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
     }
 }
 
@@ -193,6 +340,9 @@ impl Env for MountainCarEnv {
                     "MountainCar | pos: {pos:+.4} | vel: {vel:+.4}"
                 )))
             }
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
             _ => Err(Error::UnsupportedRenderMode {
                 mode: format!("{:?}", self.render_mode),
             }),
