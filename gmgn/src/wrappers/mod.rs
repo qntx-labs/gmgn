@@ -7,14 +7,28 @@
 //! Mirrors [Gymnasium wrappers](https://gymnasium.farama.org/api/wrappers/)
 //! adapted to Rust's generic type system for zero-cost composition.
 
+mod autoreset;
 mod clip_action;
+mod clip_reward;
 mod normalize_observation;
 mod normalize_reward;
+mod order_enforcing;
 mod record_episode_statistics;
+mod rescale_action;
 mod time_limit;
+mod transform_action;
+mod transform_observation;
+mod transform_reward;
 
+pub use autoreset::Autoreset;
 pub use clip_action::ClipAction;
+pub use clip_reward::ClipReward;
 pub use normalize_observation::NormalizeObservation;
 pub use normalize_reward::NormalizeReward;
+pub use order_enforcing::OrderEnforcing;
 pub use record_episode_statistics::RecordEpisodeStatistics;
+pub use rescale_action::RescaleAction;
 pub use time_limit::TimeLimit;
+pub use transform_action::TransformAction;
+pub use transform_observation::TransformObservation;
+pub use transform_reward::TransformReward;
