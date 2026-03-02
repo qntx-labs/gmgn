@@ -1,4 +1,7 @@
 //! Error types for the gmgn reinforcement learning library.
+//!
+//! All fallible operations return [`Result<T>`] which uses [`Error`] as the
+//! error type.
 
 use std::result;
 
@@ -34,6 +37,27 @@ pub enum Error {
     #[error("invalid space: {reason}")]
     InvalidSpace {
         /// Description of why the space configuration is invalid.
+        reason: String,
+    },
+
+    /// No environment registered under the given id.
+    #[error("environment not found: `{id}`")]
+    NotRegistered {
+        /// The id that was looked up.
+        id: String,
+    },
+
+    /// An environment id has already been registered.
+    #[error("environment already registered: `{id}`")]
+    AlreadyRegistered {
+        /// The duplicate id.
+        id: String,
+    },
+
+    /// Type conversion failed in dynamic dispatch.
+    #[error("type mismatch: {reason}")]
+    TypeMismatch {
+        /// Description of the mismatch.
         reason: String,
     },
 }

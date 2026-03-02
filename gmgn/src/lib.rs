@@ -1,10 +1,10 @@
 //! # gmgn — Rust Reinforcement Learning Gymnasium
 //!
 //! A pure-Rust library for reinforcement learning environments, inspired by
-//! [Gymnasium](https://gymnasium.farama.org/). Designed for zero-copy
-//! integration with the [burn](https://burn.dev/) deep learning framework.
+//! [Gymnasium](https://gymnasium.farama.org/). Designed for zero-cost
+//! abstraction and idiomatic Rust ergonomics.
 //!
-//! ## Quick Start
+//! ## Quick Start (static, generic)
 //!
 //! ```rust
 //! use gmgn::prelude::*;
@@ -21,13 +21,26 @@
 //!     }
 //! }
 //! ```
+//!
+//! ## Quick Start (dynamic, registry)
+//!
+//! ```rust
+//! use gmgn::registry::{self, DynValue};
+//!
+//! registry::register_builtins();
+//! let mut env = registry::make("CartPole-v1").unwrap();
+//! env.reset_dyn(Some(42)).unwrap();
+//! let step = env.step_dyn(&DynValue::Discrete(1)).unwrap();
+//! ```
 
 pub mod env;
 pub mod envs;
 pub mod error;
 pub mod prelude;
+pub mod registry;
 #[cfg(feature = "render")]
 pub mod render;
 pub mod rng;
 pub mod space;
 pub mod wrapper;
+pub mod wrappers;

@@ -1,6 +1,8 @@
-//! CartPole interactive demo with real-time window rendering.
+//! `CartPole` interactive demo with real-time window rendering.
 //!
 //! Run with: `cargo run --example cartpole`
+
+#![allow(clippy::print_stdout)] // Example binary — console output is expected.
 
 use gmgn::env::{Env, RenderMode};
 use gmgn::envs::classic_control::{CartPoleConfig, CartPoleEnv};

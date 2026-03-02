@@ -4,7 +4,7 @@ default-members = ["gmgn"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/gmgn"
@@ -14,6 +14,8 @@ description = "A reinforcement learning environments library for Rust."
 thiserror = "2"
 rand = "0.10"
 rand_pcg = "0.10"
+tiny-skia = "0.12.0"
+minifb = "0.28"
 
 [profile.release]
 codegen-units = 1

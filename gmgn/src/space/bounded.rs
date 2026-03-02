@@ -122,6 +122,10 @@ impl Space for BoundedSpace {
     fn shape(&self) -> &[usize] {
         &self.shape
     }
+
+    fn flatdim(&self) -> usize {
+        self.low.len()
+    }
 }
 
 #[cfg(test)]

@@ -67,6 +67,11 @@ impl Space for Discrete {
         // Scalar space — no dimensions.
         &[]
     }
+
+    #[allow(clippy::cast_possible_truncation)] // n fits in usize on all supported platforms.
+    fn flatdim(&self) -> usize {
+        self.n as usize
+    }
 }
 
 #[cfg(test)]

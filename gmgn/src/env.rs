@@ -3,16 +3,36 @@
 //! The [`Env`] trait is the central abstraction in gmgn, defining how an
 //! agent interacts with a reinforcement learning environment through
 //! [`step`](Env::step) and [`reset`](Env::reset).
+//!
+//! Mirrors [Gymnasium `Env`](https://gymnasium.farama.org/api/env/) adapted to
+//! idiomatic Rust with associated types.
 
 use std::collections::HashMap;
 
 use crate::error::Result;
 use crate::space::Space;
 
+/// A single value in the auxiliary [`Info`] dictionary.
+///
+/// Covers the most common payload types that Gymnasium environments return
+/// while remaining `Debug + Clone + Send` without requiring `serde` or `Any`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InfoValue {
+    /// Boolean flag (e.g. `TimeLimit.truncated`).
+    Bool(bool),
+    /// Integer metric (e.g. episode length).
+    Int(i64),
+    /// Floating-point metric (e.g. episode reward).
+    Float(f64),
+    /// Free-form string.
+    String(String),
+}
+
 /// Auxiliary diagnostic information returned alongside observations.
 ///
-/// Used for debugging, logging, and passing environment-specific metadata.
-pub type Info = HashMap<String, String>;
+/// Mirrors the `info` dict in Gymnasium. Used for debugging, logging, and
+/// passing environment-specific metadata such as episode statistics.
+pub type Info = HashMap<String, InfoValue>;
 
 /// The result of a single environment [`step`](Env::step).
 #[derive(Debug, Clone)]
@@ -84,7 +104,7 @@ pub enum RenderFrame {
 ///
 /// # Lifecycle
 ///
-/// 1. Create the environment.
+/// 1. Create the environment via its constructor (or [`make`](crate::registry::make)).
 /// 2. Call [`reset`](Env::reset) to obtain the first observation.
 /// 3. Repeatedly call [`step`](Env::step) with actions.
 /// 4. Call [`close`](Env::close) when done.
