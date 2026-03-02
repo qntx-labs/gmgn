@@ -75,14 +75,25 @@ fn dsdt(s_aug: &[f64; 5]) -> [f64; 5] {
     let i2 = LINK_MOI;
     let g = GRAVITY;
 
-    let d1 = (m1 * lc1).mul_add(lc1, m2 * (2.0 * l1 * lc2).mul_add(theta2.cos(), l1.mul_add(l1, lc2 * lc2))) + i1 + i2;
+    let d1 = (m1 * lc1).mul_add(
+        lc1,
+        m2 * (2.0 * l1 * lc2).mul_add(theta2.cos(), l1.mul_add(l1, lc2 * lc2)),
+    ) + i1
+        + i2;
     let d2 = m2.mul_add(lc2.mul_add(lc2, l1 * lc2 * theta2.cos()), i2);
     let phi2 = m2 * lc2 * g * (theta1 + theta2 - PI / 2.0).cos();
-    let phi1 = (m1.mul_add(lc1, m2 * l1) * g).mul_add((theta1 - PI / 2.0).cos(), (-m2 * l1 * lc2 * dtheta2 * dtheta2).mul_add(theta2.sin(), -(2.0 * m2 * l1 * lc2 * dtheta2 * dtheta1 * theta2.sin())))
-        + phi2;
+    let phi1 = (m1.mul_add(lc1, m2 * l1) * g).mul_add(
+        (theta1 - PI / 2.0).cos(),
+        (-m2 * l1 * lc2 * dtheta2 * dtheta2).mul_add(
+            theta2.sin(),
+            -(2.0 * m2 * l1 * lc2 * dtheta2 * dtheta1 * theta2.sin()),
+        ),
+    ) + phi2;
 
     // Book dynamics (Sutton & Barto).
-    let ddtheta2 = ((m2 * l1 * lc2 * dtheta1 * dtheta1).mul_add(-theta2.sin(), (d2 / d1).mul_add(phi1, a)) - phi2)
+    let ddtheta2 = ((m2 * l1 * lc2 * dtheta1 * dtheta1)
+        .mul_add(-theta2.sin(), (d2 / d1).mul_add(phi1, a))
+        - phi2)
         / ((m2 * lc2).mul_add(lc2, i2) - d2 * d2 / d1);
     let ddtheta1 = -d2.mul_add(ddtheta2, phi1) / d1;
 
@@ -114,7 +125,10 @@ fn rk4(state_aug: &[f64; 5], dt: f64) -> [f64; 5] {
 
     let mut result = [0.0; 5];
     for i in 0..5 {
-        result[i] = (dt / 6.0).mul_add(2.0f64.mul_add(k3[i], 2.0f64.mul_add(k2[i], k1[i])) + k4[i], state_aug[i]);
+        result[i] = (dt / 6.0).mul_add(
+            2.0f64.mul_add(k3[i], 2.0f64.mul_add(k2[i], k1[i])) + k4[i],
+            state_aug[i],
+        );
     }
     result
 }
@@ -225,7 +239,8 @@ impl Env for AcrobotEnv {
         }
 
         let [t1, t2, dt1, dt2] = self.state.expect("checked above");
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Action already validated.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        // Action already validated.
         let torque = AVAIL_TORQUE[*action as usize];
 
         // Augmented state for the integrator.
