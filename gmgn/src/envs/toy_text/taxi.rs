@@ -7,11 +7,24 @@
 
 use std::collections::HashMap;
 
-use super::utils::categorical_sample;
 use crate::env::{Env, InfoValue, RenderFrame, RenderMode, ResetResult, StepResult};
 use crate::error::{Error, Result};
 use crate::rng::{self, Rng};
 use crate::space::{Discrete, Space};
+
+/// Sample an index from a categorical probability distribution.
+fn categorical_sample(probs: &[f64], rng: &mut Rng) -> usize {
+    use rand::RngExt as _;
+    let r: f64 = rng.random_range(0.0..1.0);
+    let mut cum = 0.0;
+    for (i, &p) in probs.iter().enumerate() {
+        cum += p;
+        if r < cum {
+            return i;
+        }
+    }
+    probs.len() - 1
+}
 
 // The 5×5 grid map (Gymnasium default).
 const MAP: &[&str] = &[

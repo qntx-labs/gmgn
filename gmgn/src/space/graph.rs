@@ -2,17 +2,17 @@
 //!
 //! Mirrors [Gymnasium `Graph`](https://gymnasium.farama.org/api/spaces/composite/#gymnasium.spaces.Graph).
 //!
-//! Elements are [`GraphInstance`] structs containing node features, optional
-//! edge features, and an adjacency list (`edge_links`).
+//! Node and edge feature spaces accept any [`AnySpace`] variant (`Box | Discrete`
+//! etc.), matching Gymnasium's polymorphic constraint.
 //!
 //! # Examples
 //!
 //! ```
-//! use gmgn::space::{GraphSpace, BoundedSpace, Discrete, Space};
+//! use gmgn::space::{GraphSpace, AnySpace, BoundedSpace, Discrete, Space};
 //! use gmgn::rng::create_rng;
 //!
-//! let node_space = BoundedSpace::uniform(-1.0, 1.0, 3).unwrap();
-//! let edge_space = Discrete::new(4);
+//! let node_space = AnySpace::from(BoundedSpace::uniform(-1.0, 1.0, 3).unwrap());
+//! let edge_space = AnySpace::from(Discrete::new(4));
 //! let space = GraphSpace::new(node_space, Some(edge_space));
 //! let mut rng = create_rng(Some(42));
 //! let sample = space.sample(&mut rng);
@@ -22,37 +22,39 @@
 use rand::RngExt as _;
 
 use crate::rng::Rng;
-use crate::space::{BoundedSpace, Discrete, Space, SpaceInfo};
+use crate::space::dict::{AnySpace, AnyValue};
+use crate::space::{Space, SpaceInfo};
 
 /// A single graph instance produced by [`GraphSpace`].
+///
+/// Node and edge features are [`AnyValue`] to support both continuous
+/// (`BoundedSpace`) and discrete (`Discrete`) feature spaces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GraphInstance {
-    /// Node feature matrix — one `Vec<f32>` per node.
-    pub nodes: Vec<Vec<f32>>,
-    /// Edge feature vector — one `i64` per edge (from a [`Discrete`] edge space).
-    /// `None` when the graph has no edge features.
-    pub edges: Option<Vec<i64>>,
+    /// Per-node feature values.
+    pub nodes: Vec<AnyValue>,
+    /// Per-edge feature values (`None` when no edge space).
+    pub edges: Option<Vec<AnyValue>>,
     /// Adjacency list — `(src, dst)` pairs indexing into `nodes`.
-    /// `None` when there are no edges.
     pub edge_links: Option<Vec<(usize, usize)>>,
 }
 
-/// A space of variable-size graphs with typed node and optional edge features.
+/// A space of variable-size graphs with polymorphic node and edge features.
 ///
-/// Node features are drawn from a [`BoundedSpace`] and edge features from a
-/// [`Discrete`] space (matching Gymnasium's `Box | Discrete` constraint).
+/// Accepts any [`AnySpace`] variant for node and edge feature spaces,
+/// matching Gymnasium's `Box | Discrete` constraint.
 #[derive(Debug, Clone)]
 pub struct GraphSpace {
-    /// Space describing each node's feature vector.
-    node_space: BoundedSpace,
-    /// Space describing each edge's feature (`None` = edges carry no data).
-    edge_space: Option<Discrete>,
+    /// Space describing each node's features.
+    node_space: AnySpace,
+    /// Space describing each edge's features (`None` = no edge data).
+    edge_space: Option<AnySpace>,
 }
 
 impl GraphSpace {
     /// Create a new graph space.
     #[must_use]
-    pub const fn new(node_space: BoundedSpace, edge_space: Option<Discrete>) -> Self {
+    pub const fn new(node_space: AnySpace, edge_space: Option<AnySpace>) -> Self {
         Self {
             node_space,
             edge_space,
@@ -61,13 +63,13 @@ impl GraphSpace {
 
     /// The node feature space.
     #[must_use]
-    pub const fn node_space(&self) -> &BoundedSpace {
+    pub const fn node_space(&self) -> &AnySpace {
         &self.node_space
     }
 
     /// The edge feature space, if any.
     #[must_use]
-    pub const fn edge_space(&self) -> Option<&Discrete> {
+    pub const fn edge_space(&self) -> Option<&AnySpace> {
         self.edge_space.as_ref()
     }
 }
@@ -78,7 +80,7 @@ impl Space for GraphSpace {
     fn sample(&self, rng: &mut Rng) -> GraphInstance {
         // Sample a small random graph (1..=10 nodes, 0..=2*nodes edges).
         let num_nodes = rng.random_range(1_usize..=10);
-        let nodes: Vec<Vec<f32>> = (0..num_nodes)
+        let nodes: Vec<AnyValue> = (0..num_nodes)
             .map(|_| self.node_space.sample(rng))
             .collect();
 
@@ -89,7 +91,7 @@ impl Space for GraphSpace {
             } else {
                 rng.random_range(0..=max_edges)
             };
-            let edge_vals: Vec<i64> = (0..num_edges).map(|_| es.sample(rng)).collect();
+            let edge_vals: Vec<AnyValue> = (0..num_edges).map(|_| es.sample(rng)).collect();
             let links: Vec<(usize, usize)> = (0..num_edges)
                 .map(|_| {
                     (
@@ -109,7 +111,6 @@ impl Space for GraphSpace {
     }
 
     fn contains(&self, value: &GraphInstance) -> bool {
-        // All node features must belong to the node space.
         if value.nodes.is_empty() {
             return false;
         }
@@ -120,9 +121,7 @@ impl Space for GraphSpace {
         let num_nodes = value.nodes.len();
 
         match (&self.edge_space, &value.edges, &value.edge_links) {
-            // No edge space — edges and links should be None.
             (None, None, None) => true,
-            // Edge space present — edges and links must both be present and consistent.
             (Some(es), Some(edges), Some(links)) => {
                 edges.len() == links.len()
                     && edges.iter().all(|e| es.contains(e))
@@ -139,7 +138,6 @@ impl Space for GraphSpace {
     }
 
     fn flatdim(&self) -> usize {
-        // Variable-size — return node feature dimension as a hint.
         self.node_space.flatdim()
     }
 
@@ -159,10 +157,11 @@ impl Space for GraphSpace {
 mod tests {
     use super::*;
     use crate::rng::create_rng;
+    use crate::space::{BoundedSpace, Discrete};
 
     fn make_space() -> GraphSpace {
-        let node_space = BoundedSpace::uniform(-1.0, 1.0, 3).unwrap();
-        let edge_space = Discrete::new(4);
+        let node_space = AnySpace::from(BoundedSpace::uniform(-1.0, 1.0, 3).unwrap());
+        let edge_space = AnySpace::from(Discrete::new(4));
         GraphSpace::new(node_space, Some(edge_space))
     }
 
@@ -174,15 +173,22 @@ mod tests {
             let sample = space.sample(&mut rng);
             assert!(space.contains(&sample), "sample not in space");
             assert!(!sample.nodes.is_empty());
-            for node in &sample.nodes {
-                assert_eq!(node.len(), 3);
-            }
         }
     }
 
     #[test]
+    fn discrete_node_space() {
+        let node_space = AnySpace::from(Discrete::new(5));
+        let space = GraphSpace::new(node_space, None);
+        let mut rng = create_rng(Some(0));
+        let sample = space.sample(&mut rng);
+        assert!(space.contains(&sample));
+        assert!(sample.edges.is_none());
+    }
+
+    #[test]
     fn no_edge_space() {
-        let node_space = BoundedSpace::uniform(0.0, 1.0, 2).unwrap();
+        let node_space = AnySpace::from(BoundedSpace::uniform(0.0, 1.0, 2).unwrap());
         let space = GraphSpace::new(node_space, None);
         let mut rng = create_rng(Some(0));
         let sample = space.sample(&mut rng);
@@ -206,8 +212,8 @@ mod tests {
     fn rejects_bad_edge_link() {
         let space = make_space();
         let bad = GraphInstance {
-            nodes: vec![vec![0.0, 0.0, 0.0]],
-            edges: Some(vec![0]),
+            nodes: vec![AnyValue::Continuous(vec![0.0, 0.0, 0.0])],
+            edges: Some(vec![AnyValue::Discrete(0)]),
             edge_links: Some(vec![(0, 5)]), // 5 >= num_nodes
         };
         assert!(!space.contains(&bad));

@@ -9,6 +9,7 @@
 mod bounded;
 mod dict;
 mod discrete;
+pub mod flatten;
 mod graph;
 mod multi_binary;
 mod multi_discrete;
@@ -16,7 +17,6 @@ mod one_of;
 mod sequence;
 mod text;
 mod tuple;
-pub mod utils;
 
 pub use bounded::BoundedSpace;
 pub use dict::{AnySpace, AnyValue, DictSpace};

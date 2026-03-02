@@ -9,7 +9,6 @@ mod blackjack;
 mod cliff_walking;
 mod frozen_lake;
 mod taxi;
-mod utils;
 
 pub use blackjack::{BlackjackConfig, BlackjackEnv};
 pub use cliff_walking::{CliffWalkingConfig, CliffWalkingEnv};

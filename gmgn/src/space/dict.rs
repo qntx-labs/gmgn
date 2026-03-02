@@ -32,7 +32,9 @@
 use std::collections::HashMap;
 
 use crate::rng::Rng;
-use crate::space::{BoundedSpace, Discrete, MultiBinary, MultiDiscrete, Space, SpaceInfo};
+use crate::space::{
+    BoundedSpace, Discrete, MultiBinary, MultiDiscrete, Space, SpaceInfo, TextSpace,
+};
 
 /// A dictionary of named sub-spaces, all sharing the same type `S`.
 ///
@@ -134,6 +136,8 @@ pub enum AnySpace {
     MultiDiscrete(MultiDiscrete),
     /// A multi-binary space.
     MultiBinary(MultiBinary),
+    /// A text space.
+    Text(TextSpace),
 }
 
 /// Dynamic value produced by [`AnySpace::sample`](Space::sample).
@@ -150,6 +154,8 @@ pub enum AnyValue {
     MultiDiscrete(Vec<i64>),
     /// From [`MultiBinary`].
     MultiBinary(Vec<u8>),
+    /// From [`TextSpace`].
+    Text(String),
 }
 
 impl Space for AnySpace {
@@ -161,6 +167,7 @@ impl Space for AnySpace {
             Self::Bounded(s) => AnyValue::Continuous(s.sample(rng)),
             Self::MultiDiscrete(s) => AnyValue::MultiDiscrete(s.sample(rng)),
             Self::MultiBinary(s) => AnyValue::MultiBinary(s.sample(rng)),
+            Self::Text(s) => AnyValue::Text(s.sample(rng)),
         }
     }
 
@@ -170,6 +177,7 @@ impl Space for AnySpace {
             (Self::Bounded(s), AnyValue::Continuous(v)) => s.contains(v),
             (Self::MultiDiscrete(s), AnyValue::MultiDiscrete(v)) => s.contains(v),
             (Self::MultiBinary(s), AnyValue::MultiBinary(v)) => s.contains(v),
+            (Self::Text(s), AnyValue::Text(v)) => s.contains(v),
             _ => false,
         }
     }
@@ -180,6 +188,7 @@ impl Space for AnySpace {
             Self::Bounded(s) => s.shape(),
             Self::MultiDiscrete(s) => s.shape(),
             Self::MultiBinary(s) => s.shape(),
+            Self::Text(s) => s.shape(),
         }
     }
 
@@ -189,6 +198,7 @@ impl Space for AnySpace {
             Self::Bounded(s) => s.flatdim(),
             Self::MultiDiscrete(s) => s.flatdim(),
             Self::MultiBinary(s) => s.flatdim(),
+            Self::Text(s) => s.flatdim(),
         }
     }
 
@@ -198,6 +208,7 @@ impl Space for AnySpace {
             Self::Bounded(s) => s.space_info(),
             Self::MultiDiscrete(s) => s.space_info(),
             Self::MultiBinary(s) => s.space_info(),
+            Self::Text(s) => s.space_info(),
         }
     }
 }
@@ -223,6 +234,12 @@ impl From<MultiDiscrete> for AnySpace {
 impl From<MultiBinary> for AnySpace {
     fn from(s: MultiBinary) -> Self {
         Self::MultiBinary(s)
+    }
+}
+
+impl From<TextSpace> for AnySpace {
+    fn from(s: TextSpace) -> Self {
+        Self::Text(s)
     }
 }
 
