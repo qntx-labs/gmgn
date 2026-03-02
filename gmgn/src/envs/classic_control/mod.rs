@@ -7,10 +7,12 @@
 
 mod acrobot;
 mod cartpole;
+mod continuous_mountain_car;
 mod mountain_car;
 mod pendulum;
 
 pub use acrobot::{AcrobotConfig, AcrobotEnv};
 pub use cartpole::{CartPoleConfig, CartPoleEnv};
+pub use continuous_mountain_car::{ContinuousMountainCarConfig, ContinuousMountainCarEnv};
 pub use mountain_car::{MountainCarConfig, MountainCarEnv};
 pub use pendulum::{PendulumConfig, PendulumEnv};

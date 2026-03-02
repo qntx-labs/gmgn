@@ -281,6 +281,23 @@ pub fn register_builtins() {
         }),
     });
 
+    // MountainCarContinuous-v0
+    let _ = register(EnvSpec {
+        id: "MountainCarContinuous-v0".to_owned(),
+        max_episode_steps: Some(999),
+        reward_threshold: Some(90.0),
+        factory: Box::new(|rm| {
+            use crate::envs::classic_control::{
+                ContinuousMountainCarConfig, ContinuousMountainCarEnv,
+            };
+            let env = ContinuousMountainCarEnv::new(ContinuousMountainCarConfig {
+                render_mode: rm,
+                ..ContinuousMountainCarConfig::default()
+            })?;
+            Ok(Box::new(env))
+        }),
+    });
+
     // Acrobot-v1
     let _ = register(EnvSpec {
         id: "Acrobot-v1".to_owned(),
