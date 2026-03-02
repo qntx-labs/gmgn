@@ -485,6 +485,25 @@ pub fn register_builtins() {
             Ok(Box::new(env))
         }),
     });
+
+    // Box2D environments (require the `box2d` feature)
+    #[cfg(feature = "box2d")]
+    {
+        let _ = register(EnvSpec {
+            id: "LunarLander-v3".to_owned(),
+            max_episode_steps: Some(1000),
+            reward_threshold: Some(200.0),
+            order_enforce: true,
+            factory: Box::new(|rm| {
+                use crate::envs::box2d::{LunarLanderConfig, LunarLanderEnv};
+                let env = LunarLanderEnv::new(LunarLanderConfig {
+                    render_mode: rm,
+                    ..LunarLanderConfig::default()
+                })?;
+                Ok(Box::new(env))
+            }),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -550,6 +569,21 @@ mod tests {
         assert!(ids.contains(&"Taxi-v3".to_owned()));
         assert!(ids.contains(&"CliffWalking-v1".to_owned()));
         assert!(ids.contains(&"Blackjack-v1".to_owned()));
+        #[cfg(feature = "box2d")]
+        assert!(ids.contains(&"LunarLander-v3".to_owned()));
+    }
+
+    #[cfg(feature = "box2d")]
+    #[test]
+    fn make_lunar_lander() {
+        setup();
+        let mut env = make("LunarLander-v3").unwrap();
+        let r = env.reset_dyn(Some(42)).unwrap();
+        if let DynValue::Continuous(obs) = &r.obs {
+            assert_eq!(obs.len(), 8);
+        } else {
+            panic!("expected Continuous observation, got {:?}", r.obs);
+        }
     }
 
     #[test]

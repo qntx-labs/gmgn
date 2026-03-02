@@ -9,6 +9,7 @@ description.workspace = true
 [features]
 default = ["render"]
 render = ["dep:tiny-skia", "dep:minifb"]
+box2d = ["dep:box2d-rs"]
 
 [dependencies]
 thiserror.workspace = true
@@ -18,6 +19,7 @@ rand_pcg.workspace = true
 rayon.workspace = true
 tiny-skia = { workspace = true, optional = true }
 minifb = { workspace = true, optional = true }
+box2d-rs = { workspace = true, optional = true }
 
 [lints]
 workspace = true

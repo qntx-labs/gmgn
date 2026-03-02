@@ -11,13 +11,14 @@ repository = "https://github.com/qntx/gmgn"
 description = "A reinforcement learning environments library for Rust."
 
 [workspace.dependencies]
-thiserror = "2"
+box2d-rs = "0.0.4"
+minifb = "0.28"
 rand = "0.10"
 rand_distr = "0.6"
 rand_pcg = "0.10"
 rayon = "1"
+thiserror = "2"
 tiny-skia = "0.12.0"
-minifb = "0.28"
 
 [profile.release]
 codegen-units = 1
