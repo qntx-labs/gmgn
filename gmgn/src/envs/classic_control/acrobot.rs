@@ -11,15 +11,14 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
-use crate::error::{Error, Result};
-use crate::rng::{self, Rng};
-use crate::space::{BoundedSpace, Discrete, Space};
-
 use rand::RngExt as _;
 
+use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::error::{Error, Result};
 #[cfg(feature = "render")]
 use crate::render::{Canvas, RenderWindow};
+use crate::rng::{self, Rng};
+use crate::space::{BoundedSpace, Discrete, Space};
 
 const LINK_LENGTH_1: f64 = 1.0;
 const LINK_LENGTH_2: f64 = 1.0;
@@ -237,6 +236,10 @@ impl AcrobotEnv {
     }
 
     /// Render the acrobot scene to the internal canvas.
+    ///
+    /// Matches Gymnasium's rendering: rotated rectangle links with joint
+    /// circles, proper colors (cyan links, yellow joints), and correct
+    /// coordinate transforms accounting for Gymnasium's Y-flip.
     #[cfg(feature = "render")]
     #[allow(clippy::cast_possible_truncation)]
     fn render_pixels(&mut self) -> Result<RenderFrame> {
@@ -251,53 +254,82 @@ impl AcrobotEnv {
 
         canvas.clear(tiny_skia::Color::WHITE);
 
-        let bound = LINK_LENGTH_1 + LINK_LENGTH_2 + 0.2;
-        let scale = (f64::from(SCREEN_DIM) / (bound * 2.0)) as f32;
+        let bound = (LINK_LENGTH_1 + LINK_LENGTH_2 + 0.2) as f32;
+        let scale = SCREEN_DIM as f32 / (bound * 2.0);
         let offset = SCREEN_DIM as f32 / 2.0;
+        let link_width = 0.1 * scale; // half-width for link rectangles
 
-        // First link: from pivot (offset, offset) to elbow.
-        let p1_x = ((LINK_LENGTH_1 * t1.sin()) as f32).mul_add(scale, offset);
-        let p1_y = ((LINK_LENGTH_1 * t1.cos()) as f32).mul_add(scale, offset);
+        let link_color = tiny_skia::Color::from_rgba8(0, 204, 204, 255);
+        let joint_color = tiny_skia::Color::from_rgba8(204, 204, 0, 255);
+        let joint_radius = 0.1 * scale;
 
-        // Second link tip: elbow + link2 direction.
-        let p2_x = (LINK_LENGTH_1.mul_add(t1.sin(), LINK_LENGTH_2 * (t1 + t2).sin()) as f32)
+        // Joint positions (after Gymnasium's Y-flip transform):
+        // Pivot at (offset, offset).
+        // Elbow: (L1*sin(t1)*scale + offset, L1*cos(t1)*scale + offset).
+        let p1_x = (LINK_LENGTH_1 as f32 * (t1 as f32).sin()).mul_add(scale, offset);
+        let p1_y = (LINK_LENGTH_1 as f32 * (t1 as f32).cos()).mul_add(scale, offset);
+
+        // Tip: ((L1*sin(t1)+L2*sin(t1+t2))*scale + offset, ...).
+        let p2_x = (LINK_LENGTH_1 as f32)
+            .mul_add(
+                (t1 as f32).sin(),
+                LINK_LENGTH_2 as f32 * ((t1 + t2) as f32).sin(),
+            )
             .mul_add(scale, offset);
-        let p2_y = (LINK_LENGTH_1.mul_add(t1.cos(), LINK_LENGTH_2 * (t1 + t2).cos()) as f32)
+        let p2_y = (LINK_LENGTH_1 as f32)
+            .mul_add(
+                (t1 as f32).cos(),
+                LINK_LENGTH_2 as f32 * ((t1 + t2) as f32).cos(),
+            )
             .mul_add(scale, offset);
 
-        // Target height line: -cos(t1) - cos(t1+t2) > 1.0
-        // This corresponds to tip_y (in world coords) = 1.0 above pivot.
+        // Target height line at y = offset - scale (1 link-length above pivot).
         let target_y = offset - scale;
-
-        let target_color = tiny_skia::Color::from_rgba8(0, 0, 0, 128);
         canvas.stroke_line(
             0.0,
             target_y,
             SCREEN_DIM as f32,
             target_y,
             1.0,
-            target_color,
+            tiny_skia::Color::BLACK,
         );
 
-        // Draw links.
-        let link_color = tiny_skia::Color::from_rgba8(0, 119, 187, 255);
-        canvas.stroke_line(offset, offset, p1_x, p1_y, 6.0, link_color);
+        // Helper: draw a rotated rectangle link from joint (jx, jy) with
+        // rotation angle theta (Gymnasium uses theta - pi/2 as rotate_rad arg).
+        // After the combined rotate + Y-flip transform, for local corner (lx, ly):
+        //   sx = lx*sin(theta) + ly*cos(theta) + jx
+        //   sy = lx*cos(theta) - ly*sin(theta) + jy
+        let draw_link = |canvas: &mut Canvas, jx: f32, jy: f32, theta: f64, llen: f32| {
+            let sin_t = (theta as f32).sin();
+            let cos_t = (theta as f32).cos();
+            let lw = link_width;
+            // Rectangle: (0, -lw) to (llen, lw)
+            let corners: [(f32, f32); 4] = [(0.0, -lw), (0.0, lw), (llen, lw), (llen, -lw)];
+            let transformed: Vec<(f32, f32)> = corners
+                .iter()
+                .map(|&(lx, ly)| {
+                    let sx = lx.mul_add(sin_t, ly * cos_t) + jx;
+                    let sy = lx.mul_add(cos_t, -(ly * sin_t)) + jy;
+                    (sx, sy)
+                })
+                .collect();
+            canvas.fill_polygon(&transformed, link_color);
+        };
 
-        let link2_color = tiny_skia::Color::from_rgba8(0, 153, 68, 255);
-        canvas.stroke_line(p1_x, p1_y, p2_x, p2_y, 6.0, link2_color);
+        // Link 1: from pivot, rotation angle = t1
+        let l1_len = LINK_LENGTH_1 as f32 * scale;
+        draw_link(canvas, offset, offset, t1, l1_len);
 
-        // Joints.
-        let joint_color = tiny_skia::Color::from_rgba8(51, 153, 51, 255);
-        canvas.fill_circle(offset, offset, 5.0, joint_color);
-        canvas.fill_circle(p1_x, p1_y, 5.0, joint_color);
+        // Link 2: from elbow, rotation angle = t1 + t2
+        let l2_len = LINK_LENGTH_2 as f32 * scale;
+        draw_link(canvas, p1_x, p1_y, t1 + t2, l2_len);
 
-        // Tip.
-        canvas.fill_circle(
-            p2_x,
-            p2_y,
-            4.0,
-            tiny_skia::Color::from_rgba8(204, 0, 0, 255),
-        );
+        // Joint circles (yellow).
+        canvas.fill_circle(offset, offset, joint_radius, joint_color);
+        canvas.fill_circle(p1_x, p1_y, joint_radius, joint_color);
+
+        // Tip indicator (small circle).
+        canvas.fill_circle(p2_x, p2_y, joint_radius * 0.5, joint_color);
 
         match self.render_mode {
             RenderMode::Human => {

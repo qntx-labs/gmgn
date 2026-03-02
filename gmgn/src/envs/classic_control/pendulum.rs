@@ -7,15 +7,14 @@
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
-use crate::error::{Error, Result};
-use crate::rng::{self, Rng};
-use crate::space::BoundedSpace;
-
 use rand::RngExt as _;
 
+use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::error::{Error, Result};
 #[cfg(feature = "render")]
 use crate::render::{Canvas, RenderWindow};
+use crate::rng::{self, Rng};
+use crate::space::BoundedSpace;
 
 const MAX_SPEED: f64 = 8.0;
 const MAX_TORQUE: f64 = 2.0;
@@ -146,6 +145,11 @@ impl PendulumEnv {
     }
 
     /// Render the pendulum scene to the internal canvas.
+    ///
+    /// Matches Gymnasium's rendering exactly: rotated rectangle rod with
+    /// rounded end-caps, proper colors, and correct coordinate transforms
+    /// (Gymnasium draws in Y-down then flips; we compute final screen coords
+    /// directly).
     #[cfg(feature = "render")]
     #[allow(clippy::cast_possible_truncation)]
     fn render_pixels(&mut self) -> Result<RenderFrame> {
@@ -160,48 +164,60 @@ impl PendulumEnv {
 
         canvas.clear(tiny_skia::Color::WHITE);
 
-        let center_x = SCREEN_DIM as f32 / 2.0;
-        let center_y = SCREEN_DIM as f32 / 2.0;
-        let rod_len = 150.0_f32;
-        let rod_width = 6.0_f32;
+        // Gymnasium: bound=2.2, scale=screen_dim/(bound*2), offset=screen_dim//2
+        let bound = 2.2_f32;
+        let scale = SCREEN_DIM as f32 / (bound * 2.0);
+        let offset = SCREEN_DIM as f32 / 2.0;
 
-        // Pendulum hangs downward when theta=0, so tip direction is (sin(θ), cos(θ)).
-        let tip_x = rod_len.mul_add(theta.sin() as f32, center_x);
-        let tip_y = rod_len.mul_add(theta.cos() as f32, center_y);
+        let rod_length = scale; // 1.0 * scale
+        let rod_width = 0.2 * scale;
+        let rod_color = tiny_skia::Color::from_rgba8(204, 77, 77, 255);
 
-        // Rod as a thick line.
-        let rod_color = tiny_skia::Color::from_rgba8(0, 119, 187, 255);
-        canvas.stroke_line(center_x, center_y, tip_x, tip_y, rod_width, rod_color);
+        // Rod rectangle in local coords: extends along +X from 0 to rod_length,
+        // half-width rod_width/2 above and below.
+        let rw2 = rod_width / 2.0;
+        let corners_local: [(f32, f32); 4] = [
+            (0.0, -rw2),
+            (0.0, rw2),
+            (rod_length, rw2),
+            (rod_length, -rw2),
+        ];
 
-        // Bob at the tip.
-        canvas.fill_circle(tip_x, tip_y, 12.0, rod_color);
+        // Gymnasium rotates by (theta + pi/2) then Y-flips. The combined
+        // transform for corner (lx, ly) → screen coords is:
+        //   sx = offset - lx*sin(theta) - ly*cos(theta)
+        //   sy = offset - lx*cos(theta) + ly*sin(theta)
+        let sin_t = (theta as f32).sin();
+        let cos_t = (theta as f32).cos();
 
-        // Pivot circle.
-        canvas.fill_circle(center_x, center_y, 5.0, tiny_skia::Color::BLACK);
+        let rod_corners: Vec<(f32, f32)> = corners_local
+            .iter()
+            .map(|&(lx, ly)| {
+                let sx = offset - lx.mul_add(sin_t, ly * cos_t);
+                let sy = offset - lx.mul_add(cos_t, -(ly * sin_t));
+                (sx, sy)
+            })
+            .collect();
 
-        // Torque indicator arc (small colored bar at pivot).
-        if let Some(u) = self.last_u {
-            let bar_len = (u / MAX_TORQUE * 40.0) as f32;
-            let bar_color = if u >= 0.0 {
-                tiny_skia::Color::from_rgba8(255, 0, 0, 180)
-            } else {
-                tiny_skia::Color::from_rgba8(0, 0, 255, 180)
-            };
-            canvas.stroke_line(
-                center_x,
-                center_y - 15.0,
-                center_x + bar_len,
-                center_y - 15.0,
-                4.0,
-                bar_color,
-            );
-        }
+        canvas.fill_polygon(&rod_corners, rod_color);
+
+        // Circle at rod start (pivot end) — cosmetic cap.
+        canvas.fill_circle(offset, offset, rw2, rod_color);
+
+        // Circle at rod end.
+        let end_x = offset - rod_length * sin_t;
+        let end_y = offset - rod_length * cos_t;
+        canvas.fill_circle(end_x, end_y, rw2, rod_color);
+
+        // Axle dot (black, small).
+        let axle_r = 0.05 * scale;
+        canvas.fill_circle(offset, offset, axle_r, tiny_skia::Color::BLACK);
 
         match self.render_mode {
             RenderMode::Human => {
                 let window = self.window.get_or_insert_with(|| {
                     RenderWindow::new(
-                        "Pendulum — gmgn",
+                        "Pendulum \u{2014} gmgn",
                         SCREEN_DIM as usize,
                         SCREEN_DIM as usize,
                         RENDER_FPS,

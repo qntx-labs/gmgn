@@ -9,15 +9,14 @@
 
 use std::collections::HashMap;
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
-use crate::error::{Error, Result};
-use crate::rng::{self, Rng};
-use crate::space::{BoundedSpace, Discrete, Space};
-
 use rand::RngExt as _;
 
+use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::error::{Error, Result};
 #[cfg(feature = "render")]
 use crate::render::{Canvas, RenderWindow};
+use crate::rng::{self, Rng};
+use crate::space::{BoundedSpace, Discrete, Space};
 
 const GRAVITY: f64 = 9.8;
 const CART_MASS: f64 = 1.0;

@@ -11,15 +11,14 @@
 
 use std::collections::HashMap;
 
-use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
-use crate::error::{Error, Result};
-use crate::rng::{self, Rng};
-use crate::space::{BoundedSpace, Discrete, Space};
-
 use rand::RngExt as _;
 
+use crate::env::{Env, RenderFrame, RenderMode, ResetResult, StepResult};
+use crate::error::{Error, Result};
 #[cfg(feature = "render")]
 use crate::render::{Canvas, RenderWindow};
+use crate::rng::{self, Rng};
+use crate::space::{BoundedSpace, Discrete, Space};
 
 const MIN_POSITION: f64 = -1.2;
 const MAX_POSITION: f64 = 0.6;
@@ -177,37 +176,43 @@ impl MountainCarEnv {
             .collect();
         canvas.stroke_polyline(&terrain, 2.0, tiny_skia::Color::BLACK);
 
-        // Car position on the curve.
-        let car_sx = ((pos - MIN_POSITION) * scale) as f32;
-        let car_sy = Self::height(pos).mul_add(-scale, h) as f32;
+        // Car position on the curve (Y-flipped: screen_y = h - world_y).
+        let car_world_x = ((pos - MIN_POSITION) * scale) as f32;
+        let car_world_y = (Self::height(pos) * scale) as f32;
         let clearance = 10.0_f32;
 
-        // Car body (rotated rectangle following the slope).
-        let slope_angle = (3.0 * pos).cos() * 3.0 * 0.45;
-        let sin_a = (-slope_angle as f32).sin();
-        let cos_a = (-slope_angle as f32).cos();
+        // Gymnasium rotates by cos(3*pos). In pygame Y-down with flip, the
+        // visual rotation needs negation for our already-flipped coords.
+        let rot_angle = (3.0 * pos).cos() as f32;
+        let sin_a = rot_angle.sin();
+        let cos_a = rot_angle.cos();
         let hw = CAR_WIDTH / 2.0;
         let hh = CAR_HEIGHT;
 
-        let corners_local: [(f32, f32); 4] = [(-hw, 0.0), (-hw, -hh), (hw, -hh), (hw, 0.0)];
+        // Rectangle corners matching Gymnasium: l=-cw/2, r=cw/2, b=0, t=ch.
+        let corners_local: [(f32, f32); 4] = [(-hw, 0.0), (-hw, hh), (hw, hh), (hw, 0.0)];
 
+        // pygame.math.Vector2.rotate_rad rotates mathematically (CCW in Y-up).
+        // After Y-flip, the final screen coords for corner (lx, ly) are:
+        //   sx = lx*cos - ly*sin + car_world_x
+        //   sy = h - (lx*sin + ly*cos + clearance + car_world_y)
         let car_corners: Vec<(f32, f32)> = corners_local
             .iter()
             .map(|&(lx, ly)| {
-                let rx = lx.mul_add(cos_a, -(ly * sin_a)) + car_sx;
-                let ry = lx.mul_add(sin_a, ly * cos_a) + car_sy - clearance;
+                let rx = lx.mul_add(cos_a, -(ly * sin_a)) + car_world_x;
+                let ry = h as f32 - (lx.mul_add(sin_a, ly * cos_a) + clearance + car_world_y);
                 (rx, ry)
             })
             .collect();
 
         canvas.fill_polygon(&car_corners, tiny_skia::Color::BLACK);
 
-        // Wheels.
+        // Wheels — same transform as car body.
         let wheel_radius = CAR_HEIGHT / 2.5;
         let wheel_color = tiny_skia::Color::from_rgba8(128, 128, 128, 255);
-        for &offset in &[-(CAR_WIDTH / 4.0), CAR_WIDTH / 4.0] {
-            let wx = offset.mul_add(cos_a, car_sx);
-            let wy = offset.mul_add(sin_a, car_sy - clearance);
+        for &woff in &[CAR_WIDTH / 4.0, -(CAR_WIDTH / 4.0)] {
+            let wx = woff.mul_add(cos_a, car_world_x);
+            let wy = h as f32 - (woff.mul_add(sin_a, clearance + car_world_y));
             canvas.fill_circle(wx, wy, wheel_radius, wheel_color);
         }
 
