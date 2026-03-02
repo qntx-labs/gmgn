@@ -10,6 +10,7 @@
 mod autoreset;
 mod clip_action;
 mod clip_reward;
+mod delay_observation;
 mod filter_observation;
 mod flatten_observation;
 mod frame_stack;
@@ -30,6 +31,7 @@ mod transform_reward;
 pub use autoreset::Autoreset;
 pub use clip_action::ClipAction;
 pub use clip_reward::ClipReward;
+pub use delay_observation::DelayObservation;
 pub use filter_observation::FilterObservation;
 pub use flatten_observation::FlattenObservation;
 pub use frame_stack::FrameStackObservation;

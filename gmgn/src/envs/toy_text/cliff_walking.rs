@@ -32,6 +32,20 @@ const NUM_COLS: usize = 12;
 const NUM_STATES: u64 = (NUM_ROWS * NUM_COLS) as u64; // 48
 const NUM_ACTIONS: u64 = 4;
 
+/// Sample an index from a categorical probability distribution.
+fn categorical_sample(probs: &[f64], rng: &mut Rng) -> usize {
+    use rand::RngExt as _;
+    let r: f64 = rng.random_range(0.0..1.0);
+    let mut cum = 0.0;
+    for (i, &p) in probs.iter().enumerate() {
+        cum += p;
+        if cum > r {
+            return i;
+        }
+    }
+    probs.len() - 1
+}
+
 /// A single transition entry: `(probability, next_state, reward, terminated)`.
 type Transition = (f64, i64, f64, bool);
 
@@ -40,12 +54,17 @@ type Transition = (f64, i64, f64, bool);
 pub struct CliffWalkingConfig {
     /// The render mode for this environment.
     pub render_mode: RenderMode,
+    /// If `true`, the agent may slip perpendicular to the intended direction
+    /// with probability 1/3 each for (left, forward, right).
+    /// Mirrors Gymnasium's `CliffWalkingSlippery-v1`.
+    pub is_slippery: bool,
 }
 
 impl Default for CliffWalkingConfig {
     fn default() -> Self {
         Self {
             render_mode: RenderMode::None,
+            is_slippery: false,
         }
     }
 }
@@ -123,6 +142,8 @@ impl CliffWalkingEnv {
             }
         };
 
+        let is_slippery = config.is_slippery;
+
         #[allow(clippy::cast_possible_truncation)]
         let mut transitions: Vec<Vec<Vec<Transition>>> =
             vec![vec![Vec::new(); NUM_ACTIONS as usize]; NUM_STATES as usize];
@@ -135,21 +156,32 @@ impl CliffWalkingEnv {
                 for a in 0..NUM_ACTIONS as i64 {
                     let li = &mut transitions[s as usize][a as usize];
 
-                    let (dr, dc) = delta(a);
-                    let nr = (r as isize + dr)
-                        .clamp(0, (NUM_ROWS - 1) as isize)
-                        .cast_unsigned();
-                    let nc = (c as isize + dc)
-                        .clamp(0, (NUM_COLS - 1) as isize)
-                        .cast_unsigned();
-                    let ns = (nr * NUM_COLS + nc) as i64;
-
-                    if is_cliff(nr, nc) {
-                        // Cliff → back to start, −100, not terminated.
-                        li.push((1.0, start_state, -100.0, false));
+                    // When slippery, agent may move in the intended direction
+                    // or perpendicular (left/right of intended), each with p=1/3.
+                    let moves: Vec<i64> = if is_slippery {
+                        vec![(a - 1).rem_euclid(4), a, (a + 1).rem_euclid(4)]
                     } else {
-                        let terminated = ns == goal_state;
-                        li.push((1.0, ns, -1.0, terminated));
+                        vec![a]
+                    };
+                    let prob = 1.0 / moves.len() as f64;
+
+                    for m in &moves {
+                        let (dr, dc) = delta(*m);
+                        let nr = (r as isize + dr)
+                            .clamp(0, (NUM_ROWS - 1) as isize)
+                            .cast_unsigned();
+                        let nc = (c as isize + dc)
+                            .clamp(0, (NUM_COLS - 1) as isize)
+                            .cast_unsigned();
+
+                        if is_cliff(nr, nc) {
+                            // Cliff → back to start, −100, not terminated.
+                            li.push((prob, start_state, -100.0, false));
+                        } else {
+                            let ns = (nr * NUM_COLS + nc) as i64;
+                            let terminated = ns == goal_state;
+                            li.push((prob, ns, -1.0, terminated));
+                        }
                     }
                 }
             }
@@ -297,7 +329,12 @@ impl Env for CliffWalkingEnv {
 
         let s = self.state.expect("checked above") as usize;
         let a = *action as usize;
-        let (p, ns, reward, terminated) = self.transitions[s][a][0]; // deterministic
+        let trans = &self.transitions[s][a];
+
+        // Sample from transition distribution (deterministic if not slippery).
+        let probs: Vec<f64> = trans.iter().map(|t| t.0).collect();
+        let idx = categorical_sample(&probs, &mut self.rng);
+        let (p, ns, reward, terminated) = trans[idx];
 
         self.state = Some(ns);
         self.last_action = Some(*action);

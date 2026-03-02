@@ -227,7 +227,7 @@ impl BlackjackEnv {
         canvas.clear(tiny_skia::Color::from_rgba8(7, 99, 36, 255));
         let white = tiny_skia::Color::WHITE;
 
-        // --- Dealer section ---
+        // Dealer section
         // "Dealer: X" label area (white bar approximation since we can't render text).
         let dealer_bar_y = spacing;
         canvas.fill_rect(
@@ -254,7 +254,7 @@ impl BlackjackEnv {
         let hidden_x = (SCREEN_W / 2 + spacing / 2) as i32;
         canvas.blit(hidden_x, dealer_card_y, &sprites.card_back);
 
-        // --- Player section ---
+        // Player section
         let player_label_y = dealer_card_y + card_img_h as i32 + (1.5 * spacing as f32) as i32;
         canvas.fill_rect(
             spacing as f32,

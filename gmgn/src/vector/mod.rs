@@ -6,9 +6,11 @@
 //! Mirrors [Gymnasium vector](https://gymnasium.farama.org/api/vector/)
 //! adapted to Rust's ownership model.
 
+mod async_vec;
 mod sync_vec;
 mod wrapper;
 
+pub use async_vec::AsyncVectorEnv;
 pub use sync_vec::SyncVectorEnv;
 pub use wrapper::VecRecordEpisodeStatistics;
 
@@ -40,11 +42,22 @@ pub struct VecResetResult<O> {
 }
 
 /// Autoreset behaviour when a sub-environment episode ends.
+///
+/// Mirrors [Gymnasium `AutoresetMode`](https://gymnasium.farama.org/api/vector/#gymnasium.vector.AutoresetMode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AutoresetMode {
     /// Reset on the **next** call to `step` (default, matches Gymnasium).
+    ///
+    /// When a sub-env terminates, the *next* `step` call resets it and
+    /// returns the reset observation with zero reward instead of stepping.
     #[default]
     NextStep,
+    /// Reset in the **same** `step` call that caused termination.
+    ///
+    /// The final observation and info are stored under `"final_obs"` and
+    /// `"final_info"` in the info dict, and the returned observation is
+    /// the fresh post-reset observation.
+    SameStep,
     /// Disabled — the caller is responsible for resetting.
     Disabled,
 }

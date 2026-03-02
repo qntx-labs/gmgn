@@ -9,6 +9,7 @@
 
 mod dyn_env;
 mod dyn_value;
+mod dyn_wrappers;
 mod env_id;
 
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use std::sync::{LazyLock, RwLock};
 
 pub use dyn_env::DynEnv;
 pub use dyn_value::DynValue;
+use dyn_wrappers::{DynOrderEnforcing, DynTimeLimit};
 pub use env_id::EnvId;
 
 use crate::env::RenderMode;
@@ -31,6 +33,9 @@ pub struct EnvSpec {
     pub max_episode_steps: Option<u64>,
     /// Reward threshold that defines "solved" (`None` = unspecified).
     pub reward_threshold: Option<f64>,
+    /// Whether to wrap with [`OrderEnforcing`](crate::wrappers::OrderEnforcing) (default `true`).
+    /// Mirrors Gymnasium's `EnvSpec.order_enforce`.
+    pub order_enforce: bool,
     /// Factory that produces a boxed type-erased environment.
     factory: Box<dyn Fn(RenderMode) -> Result<Box<dyn DynEnv>> + Send + Sync>,
 }
@@ -41,6 +46,7 @@ impl std::fmt::Debug for EnvSpec {
             .field("id", &self.id)
             .field("max_episode_steps", &self.max_episode_steps)
             .field("reward_threshold", &self.reward_threshold)
+            .field("order_enforce", &self.order_enforce)
             .finish_non_exhaustive()
     }
 }
@@ -95,7 +101,19 @@ pub fn make_with(id: &str, render_mode: RenderMode) -> Result<Box<dyn DynEnv>> {
     let spec = reg
         .get(id)
         .ok_or_else(|| Error::NotRegistered { id: id.to_owned() })?;
-    (spec.factory)(render_mode)
+    let mut env = (spec.factory)(render_mode)?;
+
+    // Auto-wrap with TimeLimit if max_episode_steps is specified.
+    if let Some(max_steps) = spec.max_episode_steps {
+        env = Box::new(DynTimeLimit::new(env, max_steps));
+    }
+
+    // Auto-wrap with OrderEnforcing if enabled.
+    if spec.order_enforce {
+        env = Box::new(DynOrderEnforcing::new(env));
+    }
+
+    Ok(env)
 }
 
 /// Create a synchronous vectorized environment from a registered id.
@@ -281,6 +299,7 @@ pub fn register_builtins() {
         id: "CartPole-v1".to_owned(),
         max_episode_steps: Some(500),
         reward_threshold: Some(475.0),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::classic_control::{CartPoleConfig, CartPoleEnv};
             let env = CartPoleEnv::new(CartPoleConfig {
@@ -295,6 +314,7 @@ pub fn register_builtins() {
         id: "MountainCar-v0".to_owned(),
         max_episode_steps: Some(200),
         reward_threshold: Some(-110.0),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::classic_control::{MountainCarConfig, MountainCarEnv};
             let env = MountainCarEnv::new(MountainCarConfig {
@@ -309,6 +329,7 @@ pub fn register_builtins() {
         id: "Pendulum-v1".to_owned(),
         max_episode_steps: Some(200),
         reward_threshold: None,
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::classic_control::{PendulumConfig, PendulumEnv};
             let env = PendulumEnv::new(PendulumConfig {
@@ -323,6 +344,7 @@ pub fn register_builtins() {
         id: "MountainCarContinuous-v0".to_owned(),
         max_episode_steps: Some(999),
         reward_threshold: Some(90.0),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::classic_control::{
                 ContinuousMountainCarConfig, ContinuousMountainCarEnv,
@@ -339,6 +361,7 @@ pub fn register_builtins() {
         id: "Acrobot-v1".to_owned(),
         max_episode_steps: Some(500),
         reward_threshold: Some(-100.0),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::classic_control::{AcrobotConfig, AcrobotEnv};
             let env = AcrobotEnv::new(AcrobotConfig { render_mode: rm })?;
@@ -350,6 +373,7 @@ pub fn register_builtins() {
         id: "FrozenLake-v1".to_owned(),
         max_episode_steps: Some(100),
         reward_threshold: Some(0.70),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::toy_text::{FrozenLakeConfig, FrozenLakeEnv};
             let env = FrozenLakeEnv::new(FrozenLakeConfig {
@@ -364,6 +388,7 @@ pub fn register_builtins() {
         id: "FrozenLake8x8-v1".to_owned(),
         max_episode_steps: Some(200),
         reward_threshold: Some(0.85),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::toy_text::{FrozenLakeConfig, FrozenLakeEnv, MAP_8X8};
             let env = FrozenLakeEnv::new(FrozenLakeConfig {
@@ -379,6 +404,7 @@ pub fn register_builtins() {
         id: "Taxi-v3".to_owned(),
         max_episode_steps: Some(200),
         reward_threshold: Some(8.0),
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::toy_text::{TaxiConfig, TaxiEnv};
             let env = TaxiEnv::new(TaxiConfig { render_mode: rm });
@@ -390,9 +416,28 @@ pub fn register_builtins() {
         id: "CliffWalking-v1".to_owned(),
         max_episode_steps: None,
         reward_threshold: None,
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::toy_text::{CliffWalkingConfig, CliffWalkingEnv};
-            let env = CliffWalkingEnv::new(CliffWalkingConfig { render_mode: rm });
+            let env = CliffWalkingEnv::new(CliffWalkingConfig {
+                render_mode: rm,
+                ..CliffWalkingConfig::default()
+            });
+            Ok(Box::new(env))
+        }),
+    });
+
+    let _ = register(EnvSpec {
+        id: "CliffWalkingSlippery-v1".to_owned(),
+        max_episode_steps: None,
+        reward_threshold: None,
+        order_enforce: true,
+        factory: Box::new(|rm| {
+            use crate::envs::toy_text::{CliffWalkingConfig, CliffWalkingEnv};
+            let env = CliffWalkingEnv::new(CliffWalkingConfig {
+                render_mode: rm,
+                is_slippery: true,
+            });
             Ok(Box::new(env))
         }),
     });
@@ -401,6 +446,7 @@ pub fn register_builtins() {
         id: "Blackjack-v1".to_owned(),
         max_episode_steps: None,
         reward_threshold: None,
+        order_enforce: true,
         factory: Box::new(|rm| {
             use crate::envs::toy_text::{BlackjackConfig, BlackjackEnv};
             let env = BlackjackEnv::new(BlackjackConfig {

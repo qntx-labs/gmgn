@@ -136,20 +136,55 @@ impl<E: Env> VectorEnv for SyncVectorEnv<E> {
         let mut infos = Vec::with_capacity(n);
 
         for (i, (env, action)) in self.envs.iter_mut().zip(actions.iter()).enumerate() {
-            if self.needs_reset[i] && self.autoreset_mode == AutoresetMode::NextStep {
-                env.reset(None)?;
+            match self.autoreset_mode {
+                AutoresetMode::NextStep => {
+                    if self.needs_reset[i] {
+                        // Reset and return the fresh observation without stepping.
+                        let reset = env.reset(None)?;
+                        obs.push(reset.obs);
+                        rewards.push(0.0);
+                        terminated.push(false);
+                        truncated.push(false);
+                        infos.push(reset.info);
+                        self.needs_reset[i] = false;
+                        continue;
+                    }
+                }
+                AutoresetMode::SameStep | AutoresetMode::Disabled => {
+                    // SameStep: always step, then reset inline if done.
+                    // Disabled: caller is responsible for resetting.
+                }
             }
 
             let r = env.step(action)?;
-
             let done = r.terminated || r.truncated;
-            self.needs_reset[i] = done;
 
-            obs.push(r.obs);
-            rewards.push(r.reward);
-            terminated.push(r.terminated);
-            truncated.push(r.truncated);
-            infos.push(r.info);
+            if done && self.autoreset_mode == AutoresetMode::SameStep {
+                // Store final obs/info, then immediately reset.
+                let mut info = r.info;
+                // Note: we cannot store the actual Obs in Info (it's string-keyed
+                // with InfoValue), so we record a marker. Users relying on
+                // final_obs should use the obs from this step result before reset.
+                info.insert(
+                    "_final_observation".to_owned(),
+                    crate::env::InfoValue::Bool(true),
+                );
+
+                let reset = env.reset(None)?;
+                obs.push(reset.obs);
+                rewards.push(r.reward);
+                terminated.push(r.terminated);
+                truncated.push(r.truncated);
+                infos.push(info);
+                self.needs_reset[i] = false;
+            } else {
+                self.needs_reset[i] = done;
+                obs.push(r.obs);
+                rewards.push(r.reward);
+                terminated.push(r.terminated);
+                truncated.push(r.truncated);
+                infos.push(r.info);
+            }
         }
 
         Ok(VecStepResult {

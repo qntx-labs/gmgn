@@ -11,6 +11,7 @@ use gmgn::space::Space;
 fn main() {
     let mut env = CliffWalkingEnv::new(CliffWalkingConfig {
         render_mode: RenderMode::Human,
+        ..CliffWalkingConfig::default()
     });
 
     let mut rng = gmgn::rng::create_rng(Some(42));
