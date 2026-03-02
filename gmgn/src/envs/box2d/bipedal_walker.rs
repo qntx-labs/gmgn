@@ -212,8 +212,23 @@ pub struct BipedalWalkerEnv {
     // Episode state
     game_over: Rc<RefCell<bool>>,
     prev_shaping: Option<f64>,
-    #[allow(dead_code)] // will be used for rendering
     scroll: f32,
+
+    // Terrain rendering data: (4 vertices, fill color RGB)
+    #[allow(clippy::type_complexity)]
+    terrain_poly: Vec<([(f32, f32); 4], (u8, u8, u8))>,
+    // Cloud rendering data: (polygon vertices, x_min, x_max)
+    cloud_poly: Vec<(Vec<(f32, f32)>, f32, f32)>,
+    // LIDAR animation counter (used for animated ray display)
+    #[cfg(feature = "render")]
+    #[allow(dead_code)]
+    lidar_render: usize,
+
+    // Rendering resources (lazily initialized)
+    #[cfg(feature = "render")]
+    canvas: Option<crate::render::Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<crate::render::RenderWindow>,
 
     // RNG
     rng: Rng,
@@ -272,6 +287,14 @@ impl BipedalWalkerEnv {
             game_over: Rc::new(RefCell::new(false)),
             prev_shaping: None,
             scroll: 0.0,
+            terrain_poly: Vec::new(),
+            cloud_poly: Vec::new(),
+            #[cfg(feature = "render")]
+            lidar_render: 0,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
             rng: rng::create_rng(None),
         })
     }
@@ -280,8 +303,9 @@ impl BipedalWalkerEnv {
     fn create_world(&mut self) -> Vec<f32> {
         let world = B2world::new(B2vec2::new(0.0, -10.0));
 
-        // Generate terrain
+        // Generate terrain and clouds
         self.generate_terrain(&world);
+        self.generate_clouds();
 
         // Create hull
         let init_x = TERRAIN_STEP * TERRAIN_STARTPAD as f32 / 2.0;
@@ -553,13 +577,30 @@ impl BipedalWalkerEnv {
             }
         }
 
-        // Create terrain edge fixtures
+        // Create terrain edge fixtures and save polygon data for rendering
+        self.terrain_poly.clear();
         for i in 0..(TERRAIN_LENGTH - 1) {
             let mut edge = B2edgeShape::default();
             edge.set_two_sided(
                 B2vec2::new(terrain_x[i], terrain_y[i]),
                 B2vec2::new(terrain_x[i + 1], terrain_y[i + 1]),
             );
+
+            // Store filled polygon for rendering (terrain surface down to y=0)
+            let color: (u8, u8, u8) = if i % 2 == 0 {
+                (76, 255, 76)
+            } else {
+                (76, 204, 76)
+            };
+            let fill_color = (102, 153, 76);
+            let poly = [
+                (terrain_x[i], terrain_y[i]),
+                (terrain_x[i + 1], terrain_y[i + 1]),
+                (terrain_x[i + 1], 0.0),
+                (terrain_x[i], 0.0),
+            ];
+            let _ = color; // edge color stored on body in Python; we use fill_color
+            self.terrain_poly.push((poly, fill_color));
             let body_def = B2bodyDef {
                 body_type: B2bodyType::B2StaticBody,
                 ..B2bodyDef::default()
@@ -605,6 +646,250 @@ impl BipedalWalkerEnv {
         };
         B2body::create_fixture(body.clone(), &fd);
         self.terrain_bodies.push(body);
+    }
+
+    /// Generate random cloud polygons for rendering, matching Gymnasium's `_generate_clouds`.
+    fn generate_clouds(&mut self) {
+        self.cloud_poly.clear();
+        let num_clouds = TERRAIN_LENGTH / 20;
+        for _ in 0..num_clouds {
+            let x = self.rng.random_range(0.0..(TERRAIN_LENGTH as f32)) * TERRAIN_STEP;
+            let y = VIEWPORT_H / SCALE * 3.0 / 4.0;
+            let poly: Vec<(f32, f32)> = (0..5)
+                .map(|a| {
+                    let angle = PI * 2.0 * a as f32 / 5.0;
+                    let px = x
+                        + 15.0 * TERRAIN_STEP * angle.sin()
+                        + self.rng.random_range(0.0..5.0 * TERRAIN_STEP);
+                    let py = y
+                        + 5.0 * TERRAIN_STEP * angle.cos()
+                        + self.rng.random_range(0.0..5.0 * TERRAIN_STEP);
+                    (px, py)
+                })
+                .collect();
+            let x1 = poly.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+            let x2 = poly.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+            self.cloud_poly.push((poly, x1, x2));
+        }
+    }
+
+    /// Render the scene to an internal canvas, returning the appropriate frame.
+    ///
+    /// Draws sky, clouds (with parallax), terrain polygons, hull, legs, joints,
+    /// and a start flag — matching Gymnasium's visual output.
+    #[cfg(feature = "render")]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::too_many_lines
+    )]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        use crate::render::{Canvas, RenderWindow};
+
+        if self.hull.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+
+        let vw = VIEWPORT_W as u32;
+        let vh = VIEWPORT_H as u32;
+        let vw_f = VIEWPORT_W;
+        let vh_f = VIEWPORT_H;
+
+        let canvas = self.canvas.get_or_insert_with(|| Canvas::new(vw, vh));
+
+        // Sky background
+        let sky_color = tiny_skia::Color::from_rgba8(215, 215, 255, 255);
+        canvas.clear(sky_color);
+
+        // Clouds (parallax at half scroll speed)
+        let cloud_color = tiny_skia::Color::WHITE;
+        for (poly, x1, x2) in &self.cloud_poly {
+            if *x2 < self.scroll / 2.0 {
+                continue;
+            }
+            if *x1 > self.scroll / 2.0 + vw_f / SCALE {
+                continue;
+            }
+            let screen_poly: Vec<(f32, f32)> = poly
+                .iter()
+                .map(|&(px, py)| {
+                    let sx = (px - self.scroll / 2.0) * SCALE;
+                    let sy = vh_f - py * SCALE;
+                    (sx, sy)
+                })
+                .collect();
+            canvas.fill_polygon(&screen_poly, cloud_color);
+        }
+
+        // Terrain polygons
+        for (poly, color) in &self.terrain_poly {
+            // Visibility culling
+            if poly[1].0 < self.scroll {
+                continue;
+            }
+            if poly[0].0 > self.scroll + vw_f / SCALE {
+                continue;
+            }
+            let screen_poly: Vec<(f32, f32)> = poly
+                .iter()
+                .map(|&(px, py)| {
+                    let sx = (px - self.scroll) * SCALE;
+                    let sy = vh_f - py * SCALE;
+                    (sx, sy)
+                })
+                .collect();
+            let fill = tiny_skia::Color::from_rgba8(color.0, color.1, color.2, 255);
+            canvas.fill_polygon(&screen_poly, fill);
+        }
+
+        // Draw bodies: hull + legs
+        // Body colors matching Gymnasium (hull purple, legs vary by side)
+        let body_colors: [(tiny_skia::Color, tiny_skia::Color); 5] = [
+            // hull
+            (
+                tiny_skia::Color::from_rgba8(127, 51, 229, 255),
+                tiny_skia::Color::from_rgba8(76, 76, 127, 255),
+            ),
+            // upper left leg
+            (
+                tiny_skia::Color::from_rgba8(178, 101, 152, 255),
+                tiny_skia::Color::from_rgba8(127, 76, 101, 255),
+            ),
+            // lower left leg
+            (
+                tiny_skia::Color::from_rgba8(178, 101, 152, 255),
+                tiny_skia::Color::from_rgba8(127, 76, 101, 255),
+            ),
+            // upper right leg
+            (
+                tiny_skia::Color::from_rgba8(128, 51, 102, 255),
+                tiny_skia::Color::from_rgba8(77, 26, 51, 255),
+            ),
+            // lower right leg
+            (
+                tiny_skia::Color::from_rgba8(128, 51, 102, 255),
+                tiny_skia::Color::from_rgba8(77, 26, 51, 255),
+            ),
+        ];
+
+        // Hull vertices (in body-local coords, scaled)
+        let hull_local: Vec<(f32, f32)> = HULL_POLY
+            .iter()
+            .map(|&(x, y)| (x / SCALE, y / SCALE))
+            .collect();
+
+        // Leg box vertices (body-local)
+        let leg_half_w = LEG_W / 2.0;
+        let leg_half_h = LEG_H / 2.0;
+        let leg_local: [(f32, f32); 4] = [
+            (-leg_half_w, -leg_half_h),
+            (leg_half_w, -leg_half_h),
+            (leg_half_w, leg_half_h),
+            (-leg_half_w, leg_half_h),
+        ];
+
+        // Draw order: terrain bodies already drawn, now legs then hull (hull on top)
+        // Gymnasium draws in drawlist order: terrain + legs + [hull]
+        // We draw legs first, then hull on top
+        let hull = self.hull.as_ref().expect("checked above");
+
+        // Draw legs
+        for (i, leg) in self.legs.iter().enumerate() {
+            let (fill, outline) = body_colors[i + 1];
+            let b = leg.borrow();
+            let pos = b.get_position();
+            let angle = b.get_angle();
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+
+            let screen: Vec<(f32, f32)> = leg_local
+                .iter()
+                .map(|&(lx, ly)| {
+                    let wx = pos.x + cos_a * lx - sin_a * ly;
+                    let wy = pos.y + sin_a * lx + cos_a * ly;
+                    ((wx - self.scroll) * SCALE, vh_f - wy * SCALE)
+                })
+                .collect();
+
+            canvas.fill_polygon(&screen, fill);
+            canvas.stroke_polygon(&screen, 1.0, outline);
+        }
+
+        // Draw hull
+        {
+            let (fill, outline) = body_colors[0];
+            let b = hull.borrow();
+            let pos = b.get_position();
+            let angle = b.get_angle();
+            let cos_a = angle.cos();
+            let sin_a = angle.sin();
+
+            let screen: Vec<(f32, f32)> = hull_local
+                .iter()
+                .map(|&(lx, ly)| {
+                    let wx = pos.x + cos_a * lx - sin_a * ly;
+                    let wy = pos.y + sin_a * lx + cos_a * ly;
+                    ((wx - self.scroll) * SCALE, vh_f - wy * SCALE)
+                })
+                .collect();
+
+            canvas.fill_polygon(&screen, fill);
+            canvas.stroke_polygon(&screen, 1.0, outline);
+        }
+
+        // Start flag
+        {
+            let flag_x = (TERRAIN_STEP * 3.0 - self.scroll) * SCALE;
+            let flag_y1 = vh_f - TERRAIN_HEIGHT * SCALE;
+            let flag_y2 = flag_y1 - 50.0;
+            canvas.stroke_line(
+                flag_x,
+                flag_y1,
+                flag_x,
+                flag_y2,
+                1.0,
+                tiny_skia::Color::BLACK,
+            );
+            let flag_color = tiny_skia::Color::from_rgba8(230, 51, 0, 255);
+            let tri = [
+                (flag_x, flag_y2),
+                (flag_x, flag_y2 + 10.0),
+                (flag_x + 25.0, flag_y2 + 5.0),
+            ];
+            canvas.fill_polygon(&tri, flag_color);
+            canvas.stroke_polygon(&tri, 1.0, tiny_skia::Color::BLACK);
+        }
+
+        // Output
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "BipedalWalker \u{2014} gmgn",
+                        vw as usize,
+                        vh as usize,
+                        FPS as usize,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: vw,
+                    height: vh,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
     }
 
     /// Compute the 24-dimensional state vector from current physics state.
@@ -801,8 +1086,15 @@ impl Env for BipedalWalkerEnv {
     }
 
     fn render(&mut self) -> Result<RenderFrame> {
-        // Rendering not yet implemented for BipedalWalker
-        Ok(RenderFrame::None)
+        match self.render_mode {
+            RenderMode::None | RenderMode::Ansi => Ok(RenderFrame::None),
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
+            _ => Err(Error::UnsupportedRenderMode {
+                mode: format!("{:?}", self.render_mode),
+            }),
+        }
     }
 
     fn observation_space(&self) -> &BoundedSpace {

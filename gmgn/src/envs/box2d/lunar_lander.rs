@@ -8,6 +8,8 @@
 
 // box2d-rs API requires pervasive Rc<RefCell<_>> cloning; `Rc::clone(&x)` would be overly verbose.
 #![allow(clippy::clone_on_ref_ptr)]
+// Physics/rendering formulas are more readable without mul_add transformations.
+#![allow(clippy::suboptimal_flops)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -233,6 +235,18 @@ pub struct LunarLanderEnv {
     wind_idx: f32,
     torque_idx: f32,
 
+    // Terrain data needed by renderer
+    terrain_chunks_x: Vec<f32>,
+    terrain_smooth_y: Vec<f32>,
+    helipad_x1: f32,
+    helipad_x2: f32,
+
+    // Rendering resources (lazily initialized)
+    #[cfg(feature = "render")]
+    canvas: Option<crate::render::Canvas>,
+    #[cfg(feature = "render")]
+    window: Option<crate::render::RenderWindow>,
+
     rng: Rng,
 }
 
@@ -288,6 +302,14 @@ impl LunarLanderEnv {
             helipad_y: 0.0,
             wind_idx: 0.0,
             torque_idx: 0.0,
+            terrain_chunks_x: Vec::new(),
+            terrain_smooth_y: Vec::new(),
+            helipad_x1: 0.0,
+            helipad_x2: 0.0,
+            #[cfg(feature = "render")]
+            canvas: None,
+            #[cfg(feature = "render")]
+            window: None,
             rng: rng::create_rng(None),
         })
     }
@@ -381,6 +403,12 @@ impl LunarLanderEnv {
             B2body::create_fixture(moon.clone(), &fd);
         }
         self.moon = Some(moon);
+
+        // Store terrain data for rendering
+        self.terrain_chunks_x.clone_from(&chunk_x);
+        self.terrain_smooth_y = smooth_y;
+        self.helipad_x1 = chunk_x[mid - 1];
+        self.helipad_x2 = chunk_x[mid + 1];
 
         // Create lander body
         let initial_x = VIEWPORT_W / SCALE / 2.0;
@@ -707,6 +735,174 @@ impl LunarLanderEnv {
     fn rng_dispersion(&mut self) -> f32 {
         self.rng.random_range(-1.0_f32..1.0) / SCALE
     }
+
+    /// Render the scene to an internal canvas, returning the appropriate frame.
+    ///
+    /// Draws sky polygons (black), terrain, lander body (rotated polygon),
+    /// legs, and helipad flags — matching Gymnasium's visual output.
+    #[cfg(feature = "render")]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::too_many_lines
+    )]
+    fn render_pixels(&mut self) -> Result<RenderFrame> {
+        use crate::render::{Canvas, RenderWindow};
+
+        if self.lander.is_none() {
+            return Err(Error::ResetNeeded { method: "render" });
+        }
+
+        let vw = VIEWPORT_W as u32;
+        let vh = VIEWPORT_H as u32;
+
+        let canvas = self.canvas.get_or_insert_with(|| Canvas::new(vw, vh));
+        // White background (Gymnasium draws white then overlays black sky)
+        canvas.clear(tiny_skia::Color::WHITE);
+
+        let h = VIEWPORT_H / SCALE;
+        for i in 0..(self.terrain_chunks_x.len().saturating_sub(1)) {
+            let x1 = self.terrain_chunks_x[i] * SCALE;
+            let y1 = vh as f32 - self.terrain_smooth_y[i] * SCALE;
+            let x2 = self.terrain_chunks_x[i + 1] * SCALE;
+            let y2 = vh as f32 - self.terrain_smooth_y[i + 1] * SCALE;
+            let sky = [
+                (x1, y1),
+                (x2, y2),
+                (x2, vh as f32 - h * SCALE),
+                (x1, vh as f32 - h * SCALE),
+            ];
+            canvas.fill_polygon(&sky, tiny_skia::Color::BLACK);
+        }
+
+        // Helper: transform body-local polygon vertices to screen coords
+        let draw_body_poly = |canvas: &mut Canvas,
+                              body: &BodyPtr<LanderData>,
+                              verts: &[(f32, f32)],
+                              fill_color: tiny_skia::Color,
+                              outline_color: tiny_skia::Color| {
+            let b = body.borrow();
+            let pos = b.get_position();
+            let angle = b.get_angle();
+            let cos = angle.cos();
+            let sin = angle.sin();
+
+            let screen: Vec<(f32, f32)> = verts
+                .iter()
+                .map(|&(lx, ly)| {
+                    let wx = pos.x + cos * lx - sin * ly;
+                    let wy = pos.y + sin * lx + cos * ly;
+                    (wx * SCALE, vh as f32 - wy * SCALE)
+                })
+                .collect();
+
+            canvas.fill_polygon(&screen, fill_color);
+            canvas.stroke_polygon(&screen, 1.0, outline_color);
+        };
+
+        // Lander body
+        let lander = self.lander.as_ref().expect("checked above");
+        let lander_verts: Vec<(f32, f32)> = LANDER_POLY
+            .iter()
+            .map(|&(x, y)| (x / SCALE, y / SCALE))
+            .collect();
+        let lander_fill = tiny_skia::Color::from_rgba8(230, 230, 230, 255);
+        let lander_outline = tiny_skia::Color::from_rgba8(64, 64, 64, 255);
+        draw_body_poly(canvas, lander, &lander_verts, lander_fill, lander_outline);
+
+        // Legs
+        let leg_w = LEG_W / SCALE;
+        let leg_h = LEG_H / SCALE;
+        let leg_verts: Vec<(f32, f32)> = vec![
+            (-leg_w, -leg_h),
+            (leg_w, -leg_h),
+            (leg_w, leg_h),
+            (-leg_w, leg_h),
+        ];
+        for (idx, leg) in self.legs.iter().enumerate() {
+            let contact = leg_ground_contact(leg);
+            let fill = if contact {
+                tiny_skia::Color::from_rgba8(0, 200, 0, 255)
+            } else {
+                tiny_skia::Color::from_rgba8(128, 102, 230, 255)
+            };
+            let outline = if contact {
+                tiny_skia::Color::from_rgba8(0, 140, 0, 255)
+            } else {
+                tiny_skia::Color::from_rgba8(77, 77, 128, 255)
+            };
+            // Clone body ptr to satisfy borrow rules in closure
+            let leg_clone = leg.clone();
+            // Inline the draw since closure borrows canvas mutably
+            {
+                let b = leg_clone.borrow();
+                let pos = b.get_position();
+                let angle = b.get_angle();
+                let cos_a = angle.cos();
+                let sin_a = angle.sin();
+
+                let screen: Vec<(f32, f32)> = leg_verts
+                    .iter()
+                    .map(|&(lx, ly)| {
+                        let wx = pos.x + cos_a * lx - sin_a * ly;
+                        let wy = pos.y + sin_a * lx + cos_a * ly;
+                        (wx * SCALE, vh as f32 - wy * SCALE)
+                    })
+                    .collect();
+
+                canvas.fill_polygon(&screen, fill);
+                canvas.stroke_polygon(&screen, 1.0, outline);
+            }
+            let _ = idx; // suppress unused warning
+        }
+
+        for &hx in &[self.helipad_x1, self.helipad_x2] {
+            let sx = hx * SCALE;
+            let flag_y1 = vh as f32 - self.helipad_y * SCALE;
+            let flag_y2 = flag_y1 - 50.0;
+            // Flagpole
+            canvas.stroke_line(sx, flag_y1, sx, flag_y2, 1.0, tiny_skia::Color::WHITE);
+            // Flag triangle
+            let flag_color = tiny_skia::Color::from_rgba8(204, 204, 0, 255);
+            let tri = [
+                (sx, flag_y2),
+                (sx, flag_y2 + 10.0),
+                (sx + 25.0, flag_y2 + 5.0),
+            ];
+            canvas.fill_polygon(&tri, flag_color);
+            canvas.stroke_polygon(&tri, 1.0, flag_color);
+        }
+
+        match self.render_mode {
+            RenderMode::Human => {
+                let window = self.window.get_or_insert_with(|| {
+                    RenderWindow::new(
+                        "LunarLander \u{2014} gmgn",
+                        vw as usize,
+                        vh as usize,
+                        FPS as usize,
+                    )
+                    .expect("failed to create render window")
+                });
+
+                if !window.is_open() {
+                    return Ok(RenderFrame::None);
+                }
+
+                window.show(canvas)?;
+                Ok(RenderFrame::None)
+            }
+            RenderMode::RgbArray => {
+                let rgb = canvas.pixels_rgb();
+                Ok(RenderFrame::RgbArray {
+                    width: vw,
+                    height: vh,
+                    data: rgb,
+                })
+            }
+            _ => Ok(RenderFrame::None),
+        }
+    }
 }
 
 /// Internal action representation for the step function.
@@ -802,7 +998,15 @@ impl Env for LunarLanderEnv {
     }
 
     fn render(&mut self) -> Result<RenderFrame> {
-        Ok(RenderFrame::None)
+        match self.render_mode {
+            RenderMode::None | RenderMode::Ansi => Ok(RenderFrame::None),
+            #[cfg(feature = "render")]
+            RenderMode::Human | RenderMode::RgbArray => self.render_pixels(),
+            #[cfg(not(feature = "render"))]
+            _ => Err(Error::UnsupportedRenderMode {
+                mode: format!("{:?}", self.render_mode),
+            }),
+        }
     }
 
     fn observation_space(&self) -> &BoundedSpace {
