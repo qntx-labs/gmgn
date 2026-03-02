@@ -468,6 +468,8 @@ impl BipedalWalkerEnv {
 
     /// Generate terrain height profile and create `Box2D` bodies.
     fn generate_terrain(&mut self, world: &Rc<RefCell<B2world<WalkerData>>>) {
+        self.terrain_poly.clear();
+
         let mut state = GRASS;
         let mut velocity = 0.0_f32;
         let mut y = TERRAIN_HEIGHT;
@@ -578,7 +580,8 @@ impl BipedalWalkerEnv {
         }
 
         // Create terrain edge fixtures and save polygon data for rendering
-        self.terrain_poly.clear();
+        // Note: obstacle polygons were already pushed by create_terrain_polygon above;
+        // do NOT clear terrain_poly here — it was cleared in generate_terrain's caller.
         for i in 0..(TERRAIN_LENGTH - 1) {
             let mut edge = B2edgeShape::default();
             edge.set_two_sided(
@@ -646,6 +649,17 @@ impl BipedalWalkerEnv {
         };
         B2body::create_fixture(body.clone(), &fd);
         self.terrain_bodies.push(body);
+
+        // Save obstacle polygon data for rendering (white fill, matching Gymnasium)
+        if vertices.len() == 4 {
+            let poly = [
+                (vertices[0].x, vertices[0].y),
+                (vertices[1].x, vertices[1].y),
+                (vertices[2].x, vertices[2].y),
+                (vertices[3].x, vertices[3].y),
+            ];
+            self.terrain_poly.push((poly, (255, 255, 255)));
+        }
     }
 
     /// Generate random cloud polygons for rendering, matching Gymnasium's `_generate_clouds`.
