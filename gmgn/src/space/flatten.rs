@@ -17,7 +17,9 @@
 //! assert_eq!(val, 2);
 //! ```
 
-use super::{Discrete, MultiDiscrete, Space};
+use std::collections::HashMap;
+
+use super::{BoundedSpace, DictSpace, Discrete, MultiDiscrete, Space};
 
 /// Flatten a [`Discrete`] value to a one-hot encoded `Vec<f32>`.
 ///
@@ -100,6 +102,59 @@ pub fn unflatten_multi_binary(flat: &[f32]) -> Vec<u8> {
     flat.iter().map(|&v| u8::from(v >= 0.5)).collect()
 }
 
+/// Flatten a [`BoundedSpace`] value (identity — already a `Vec<f32>`).
+///
+/// This is a no-op clone, provided for API completeness so that generic
+/// flatten pipelines can treat all space types uniformly.
+#[must_use]
+pub fn flatten_bounded(value: &[f32]) -> Vec<f32> {
+    value.to_vec()
+}
+
+/// Unflatten a flat vector back to a [`BoundedSpace`] value (identity).
+#[must_use]
+pub fn unflatten_bounded(flat: &[f32]) -> Vec<f32> {
+    flat.to_vec()
+}
+
+/// Flatten a homogeneous [`DictSpace<BoundedSpace>`] value by concatenating
+/// all entries in the space's insertion order.
+///
+/// Returns a single `Vec<f32>` containing all sub-values concatenated.
+#[must_use]
+pub fn flatten_dict_bounded<S: ::std::hash::BuildHasher>(
+    space: &DictSpace<BoundedSpace>,
+    value: &HashMap<String, Vec<f32>, S>,
+) -> Vec<f32> {
+    let mut out = Vec::with_capacity(space.flatdim());
+    for (key, _) in space.iter() {
+        if let Some(v) = value.get(key) {
+            out.extend_from_slice(v);
+        }
+    }
+    out
+}
+
+/// Unflatten a flat vector back to a [`DictSpace<BoundedSpace>`] value.
+///
+/// Splits the flat vector according to each sub-space's `flatdim`,
+/// following the space's insertion order.
+#[must_use]
+pub fn unflatten_dict_bounded(
+    space: &DictSpace<BoundedSpace>,
+    flat: &[f32],
+) -> HashMap<String, Vec<f32>> {
+    let mut result = HashMap::new();
+    let mut offset = 0;
+    for (key, sub) in space.iter() {
+        let dim = sub.flatdim();
+        let chunk = flat[offset..offset + dim].to_vec();
+        result.insert(key.to_owned(), chunk);
+        offset += dim;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +202,41 @@ mod tests {
         assert_eq!(flat, vec![1.0, 0.0, 1.0, 1.0]);
         let back = unflatten_multi_binary(&flat);
         assert_eq!(back, value);
+    }
+
+    #[test]
+    fn bounded_flatten_unflatten() {
+        let value = vec![1.0_f32, -0.5, 3.14];
+        let flat = flatten_bounded(&value);
+        assert_eq!(flat, value);
+        let back = unflatten_bounded(&flat);
+        assert_eq!(back, value);
+    }
+
+    #[test]
+    fn dict_bounded_flatten_unflatten() {
+        use crate::space::{BoundedSpace, DictSpace};
+
+        let space = DictSpace::new(vec![
+            (
+                "pos".into(),
+                BoundedSpace::new(vec![-1.0, -1.0], vec![1.0, 1.0]).unwrap(),
+            ),
+            (
+                "vel".into(),
+                BoundedSpace::new(vec![0.0, 0.0, 0.0], vec![10.0, 10.0, 10.0]).unwrap(),
+            ),
+        ]);
+
+        let mut value = HashMap::new();
+        value.insert("pos".to_owned(), vec![0.5, -0.3]);
+        value.insert("vel".to_owned(), vec![1.0, 2.0, 3.0]);
+
+        let flat = flatten_dict_bounded(&space, &value);
+        assert_eq!(flat.len(), 5); // 2 + 3
+
+        let back = unflatten_dict_bounded(&space, &flat);
+        assert_eq!(back["pos"], vec![0.5, -0.3]);
+        assert_eq!(back["vel"], vec![1.0, 2.0, 3.0]);
     }
 }

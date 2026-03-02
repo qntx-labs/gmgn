@@ -40,6 +40,33 @@ pub struct EnvSpec {
     factory: Box<dyn Fn(RenderMode) -> Result<Box<dyn DynEnv>> + Send + Sync>,
 }
 
+/// A read-only view of a registered environment's metadata.
+///
+/// Returned by [`spec`] to expose structured spec data without
+/// leaking the internal factory closure.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvSpecView {
+    /// Unique identifier, e.g. `"CartPole-v1"`.
+    pub id: String,
+    /// Maximum steps per episode before truncation (`None` = unlimited).
+    pub max_episode_steps: Option<u64>,
+    /// Reward threshold that defines "solved" (`None` = unspecified).
+    pub reward_threshold: Option<f64>,
+    /// Whether the environment is wrapped with `OrderEnforcing`.
+    pub order_enforce: bool,
+}
+
+impl From<&EnvSpec> for EnvSpecView {
+    fn from(spec: &EnvSpec) -> Self {
+        Self {
+            id: spec.id.clone(),
+            max_episode_steps: spec.max_episode_steps,
+            reward_threshold: spec.reward_threshold,
+            order_enforce: spec.order_enforce,
+        }
+    }
+}
+
 impl std::fmt::Debug for EnvSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EnvSpec")
@@ -265,17 +292,18 @@ impl DynVectorEnv {
     }
 }
 
-/// Look up the [`EnvSpec`] for a registered id.
+/// Look up the metadata for a registered environment id.
 ///
-/// Returns `None` if the id is not found.
+/// Returns a structured [`EnvSpecView`] with the environment's metadata,
+/// or `None` if the id is not found.
 ///
 /// # Panics
 ///
 /// Panics if the internal registry lock is poisoned.
 #[must_use]
-pub fn spec(id: &str) -> Option<String> {
+pub fn spec(id: &str) -> Option<EnvSpecView> {
     let reg = REGISTRY.read().expect("registry lock poisoned");
-    reg.get(id).map(|s| format!("{s:?}"))
+    reg.get(id).map(EnvSpecView::from)
 }
 
 /// List all registered environment ids.

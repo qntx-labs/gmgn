@@ -34,6 +34,7 @@ pub struct CheckResult {
 /// - `step()` with a sampled action returns an observation within `observation_space`
 /// - Rewards are finite
 /// - `step()` before `reset()` returns an error
+/// - (when `seed` is provided) Seeded resets are deterministic
 ///
 /// Returns a list of issues found. An empty list means the environment passes
 /// all checks.
@@ -51,7 +52,7 @@ pub struct CheckResult {
 pub fn check_env<E>(env: &mut E, seed: Option<u64>) -> Vec<CheckResult>
 where
     E: Env,
-    E::Obs: std::fmt::Debug,
+    E::Obs: std::fmt::Debug + PartialEq,
     E::Act: std::fmt::Debug,
 {
     let mut issues = Vec::new();
@@ -67,6 +68,11 @@ where
 
     // Check step with sampled action.
     check_step(env, &mut issues);
+
+    // Check seeded reset determinism.
+    if let Some(s) = seed {
+        check_seed_determinism(env, s, &mut issues);
+    }
 
     issues
 }
@@ -157,6 +163,44 @@ where
                 message: format!("step() with sampled action failed: {e}"),
             });
         }
+    }
+}
+
+/// Verify that resetting with the same seed produces identical observations.
+fn check_seed_determinism<E>(env: &mut E, seed: u64, issues: &mut Vec<CheckResult>)
+where
+    E: Env,
+    E::Obs: std::fmt::Debug + PartialEq,
+{
+    let first = match env.reset(Some(seed)) {
+        Ok(r) => r.obs,
+        Err(e) => {
+            issues.push(CheckResult {
+                level: CheckLevel::Error,
+                message: format!("seed determinism check: first reset failed: {e}"),
+            });
+            return;
+        }
+    };
+
+    let second = match env.reset(Some(seed)) {
+        Ok(r) => r.obs,
+        Err(e) => {
+            issues.push(CheckResult {
+                level: CheckLevel::Error,
+                message: format!("seed determinism check: second reset failed: {e}"),
+            });
+            return;
+        }
+    };
+
+    if first != second {
+        issues.push(CheckResult {
+            level: CheckLevel::Error,
+            message: format!(
+                "reset(seed={seed}) is not deterministic: first={first:?}, second={second:?}"
+            ),
+        });
     }
 }
 
