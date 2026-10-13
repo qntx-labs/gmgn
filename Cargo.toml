@@ -12,7 +12,7 @@ description = "A reinforcement learning environments library for Rust."
 
 [workspace.dependencies]
 box2d-rs = "0.0.4"
-minifb = "0.28"
+minifb = "0.29"
 rand = "0.10"
 rand_distr = "0.6"
 rand_pcg = "0.10"
